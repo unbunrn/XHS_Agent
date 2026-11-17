@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "title": "厂商发布新款 AI 编程助手",
+      "url": "https://vendor.example.com/news/coding-assistant",
+      "summary": "厂商称：新款 AI 编程助手把代码补全准确率提升了 30%。该工具目前提供免费试用，正式价格尚未公布。",
+      "content": "厂商称：内部基准测试显示代码补全准确率提升 30%，尚待第三方验证。该工具目前提供免费试用，正式价格尚未公布。",
+      "author": "Demo Vendor",
+      "published_offset_hours": -8
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+# Runtime dependencies for the local bot.
+# Python 3.12 is required (see README / scripts/setup.ps1).
+#
+# These pins are the versions this project builds and tests against.  The
+# Windows development runtime used for the acceptance run had Pillow 12.3.0
+# available; lark-oapi is optional at import time but is required for real
+# Feishu delivery, so it is included here and installed into an ordinary venv.
+Pillow==12.3.0
+lark-oapi==1.7.2

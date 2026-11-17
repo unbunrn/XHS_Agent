@@ -1,0 +1,28 @@
+{
+  "items": [
+    {
+      "title": "开源模型发布新版本，支持更长上下文",
+      "url": "https://example.com/demo/open-model-200k",
+      "summary": "该开源模型发布新版本，上下文长度提升到 200K token。项目采用 Apache 2.0 许可证，API 价格标注为每百万 token 0.30 美元。",
+      "content": "该开源模型发布新版本，上下文长度提升到 200K token。项目采用 Apache 2.0 许可证，API 价格标注为每百万 token 0.30 美元。开发者可以在官方文档查看迁移说明和限流规则。",
+      "author": "Demo AI News",
+      "published_offset_hours": -5
+    },
+    {
+      "title": "AI 笔记工具新增本地导出功能",
+      "url": "https://example.com/demo/notes-local-export",
+      "summary": "这款 AI 笔记工具新增本地导出功能，免费版可以导出 Markdown 和纯文本。官方说明导出文件保存在本机，不上传云端。",
+      "content": "这款 AI 笔记工具新增本地导出功能，免费版可以导出 Markdown 和纯文本。官方说明导出文件保存在本机，不上传云端。已有用户提醒，导出前需要先更新客户端。",
+      "author": "Demo AI News",
+      "published_offset_hours": -30
+    },
+    {
+      "title": "某模型发布会全程回顾",
+      "url": "https://example.com/demo/old-launch-recap",
+      "summary": "这是一场较早的模型发布会回顾，主要介绍已经上线数月的功能，没有新的价格或开放范围变化。",
+      "content": "这是一场较早的模型发布会回顾，主要介绍已经上线数月的功能，没有新的价格或开放范围变化。",
+      "author": "Demo AI News",
+      "published_offset_hours": -120
+    }
+  ]
+}

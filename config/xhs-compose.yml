@@ -1,0 +1,35 @@
+# Project-owned bridge only. AUTH_TOKEN is supplied from local secrets in the child environment.
+name: bot-xhs
+services:
+  bridge:
+    image: xpzouying/xiaohongshu-mcp@sha256:90105616646a59babd3351503084ce8347eb2c2a7df166b0165efdc0306ed1f0
+    platform: linux/amd64
+    container_name: bot-xhs-bridge
+    restart: unless-stopped
+    command: ["./app", "-headless=true", "-port", ":18060"]
+    ports:
+      - "127.0.0.1:18060:18060"
+    environment:
+      AUTH_TOKEN: ${AUTH_TOKEN:?Local bridge token must be supplied}
+      COOKIES_PATH: /app/data/cookies.json
+      HOME: /app/data/home
+      XDG_CONFIG_HOME: /app/data/config
+    volumes:
+      - ../var/xhs-container/data:/app/data
+      - ../var/drafts:/app/images:ro
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    shm_size: 256mb
+    mem_limit: 2g
+    cpus: 2
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:18060/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

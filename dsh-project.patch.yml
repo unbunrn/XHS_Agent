@@ -1,0 +1,20 @@
+# Project-local DSH overlay. No secret values are stored here.
+# Installed 0.2.1-rc.5 headless disables these interactive services by default.
+# Reuse the existing official account provider and its normal credential validation.
+
+# 中文：这个文件配置的是“运行本项目的 DSH 工具环境”，不是机器人业务逻辑。
+# 它把凭据、授权、DeepSeek 账号和默认模型交还给官方账号提供方，
+# 并让默认模型走 deepseek-flash（reasoningEffort = high）。
+# 这里不存任何密钥；密钥仍只放在环境变量或 config/secrets.toml。
+- id: credentials
+  disabled: false
+- id: authorization
+  disabled: false
+- id: deepseek-account
+  disabled: false
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: deepseek-account
+    model: deepseek-flash
+    reasoningEffort: high

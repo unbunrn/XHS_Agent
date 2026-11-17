@@ -1,0 +1,29 @@
+# Nonsecret, editable editorial preferences for this account.
+# Per-post instructions and webpage/evidence text are never written here
+# automatically. This file shapes expression and the caption/image division,
+# never evidence, approval or publishing rules.
+
+[editorial]
+caption_image_division = "图片与正文互补；每个选题在 image_led / caption_led / balanced 中自行决定，不设固定长度比例"
+default_angle = "先判断这条内容对谁最有用、最值得记住什么，再决定图片和正文各自承担什么；不要套用固定结构"
+principles = [
+  "每个选题独立决定编辑策略、视觉词汇和卡片数量；只做一张封面也可以是完整方案",
+  "允许必要的术语、标题和简短结论在图文间共享；禁止整段复述或把正文逐段搬上图片",
+  "图片中的事实和数字必须来自 evidence；只使用本地文字与几何排版，不声称生成插画",
+  "不编造个人实测、收益、点赞收藏或流量数据",
+]
+image_layouts = [
+  "cover",
+  "comparison",
+  "process",
+  "keypoints",
+  "diagram",
+  "argument",
+  "annotated",
+]
+avoid = [
+  "固定四段式、固定卡片数量或固定三种布局组合",
+  "图片逐段复述正文",
+  "为了流程图而编造不存在的先后顺序",
+]
+updated_at = "2026-11-09T00:00:00+00:00"

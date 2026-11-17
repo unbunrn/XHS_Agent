@@ -1,0 +1,43 @@
+# Local configuration and secrets: never commit
+config/secrets.toml
+config/bot.toml
+config/bot.live.toml
+config/feishu-rehearsal.toml
+.env
+.env.*
+*.pem
+*.key
+
+# Local virtual environments (including .venv, .venv-*, .venvtest)
+.venv
+.venv/
+.venv*
+venv/
+env/
+
+# Runtime state, databases, exports, logs, PID/identity files
+var/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+
+# Python caches and build/test artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Editor / OS noise
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini

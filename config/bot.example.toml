@@ -1,0 +1,302 @@
+# Example live configuration.  Copy to config/bot.toml and fill in the account.
+# Secrets (never in this file):
+#   DEEPSEEK_API_KEY, LARK_APP_ID, LARK_APP_SECRET, LARK_OWNER_OPEN_ID,
+#   XHS_MCP_AUTH_TOKEN (or XHS_AUTH_TOKEN)
+# or put the same keys in config/secrets.toml.
+#
+# Real publishing requires all of:
+#   app.mode = "live"
+#   publisher.provider = "xiaohongshu"
+#   publisher.live_enabled = true
+#   real sources + DeepSeek (not a fixture/fake pipeline)
+#   BOT_ALLOW_REAL_PUBLISH=1 in the environment
+# and a specific final draft approved by the owner.
+
+# =============================================================================
+# 中文导读：这是“真实运行”的配置模板
+# =============================================================================
+# 复制成 config/bot.toml 后再改。密钥绝不写进这个文件：
+#   DEEPSEEK_API_KEY、LARK_APP_ID、LARK_APP_SECRET、LARK_OWNER_OPEN_ID、
+#   XHS_MCP_AUTH_TOKEN（或 XHS_AUTH_TOKEN）
+# 只放在环境变量或 config/secrets.toml 里。
+#
+# 真实发布必须同时满足：
+#   app.mode = "live"
+#   publisher.provider = "xiaohongshu"
+#   publisher.live_enabled = true
+#   真实来源 + DeepSeek（不能是 fixture/fake 管线）
+#   环境变量 BOT_ALLOW_REAL_PUBLISH=1
+# 并且 owner 对“最终这一版”明确批准。
+# 少任何一条，发布闸门都会拒绝——这是设计，不是 bug。
+# =============================================================================
+
+# 【应用】live 表示联网运行；pause_all 可随时一键暂停所有自动动作。
+[app]
+name = "bot"
+mode = "live"
+timezone = "Asia/Shanghai"
+data_dir = "var"
+db_path = "var/bot.sqlite3"
+log_dir = "var/logs"
+log_level = "INFO"
+pause_all = false
+allow_fake_in_live = false
+
+# 【账号】先确认小红书已登录，再把 enabled 改成 true、status 改成 verified。
+# 没确认就打开，发布闸门会拒绝，不会“带病发帖”。
+[account]
+id = "xhs-main"
+platform = "xiaohongshu"
+display_name = "小红书主账号（请在确认登录状态后修改）"
+enabled = false
+status = "unverified"
+
+# 【限额】每日篇数/排队数/待审批数、新闻时效、审批有效期、发布时间和重试上限。
+# 建议第一次保持 1 篇/天，观察几轮再慢慢放宽。
+[limits]
+max_drafts_per_day = 1
+max_queued_topics = 3
+max_pending_approvals = 3
+max_candidates_per_round = 3
+max_publish_per_day = 1
+max_age_hours = 72
+event_window_days = 7
+poll_interval_seconds = 1800
+poll_jitter_seconds = 120
+approval_ttl_hours = 24
+# true：owner 批准后立即尝试发布；false：等到 publish_hour_local 的时段。
+publish_immediately = false
+publish_hour_local = 20
+publish_minute_local = 0
+max_items_per_source = 30
+max_attempts = 5
+
+# 【发布前审稿】默认关闭，不影响旧的离线/低成本部署。
+# 开启后：写稿 -> 结构化审稿 -> 必要时最多一轮重写 -> 仍不通过则失败；
+# 审稿只判断事实/来源/图文一致性，不替代 approval、来源和发布闸门。
+[agent]
+critic_enabled = false
+critic_max_output_tokens = 900
+max_critic_problems = 5
+max_critic_revisions = 1
+
+# Creator Agent V2: 模型在工具 schema 内选择下一步。默认关闭；开启前先读
+# docs/CREATOR_AGENT_V2_ARCHITECTURE.md，并保持 owner 审批。
+[creator_agent]
+enabled = false
+max_steps = 8
+max_revision_steps = 6
+max_review_cycles = 2
+max_searches = 5
+max_physical_fetches = 6
+max_model_calls = 14
+max_invalid_decisions = 2
+max_no_progress_steps = 2
+max_run_seconds = 600
+# 每日自动发现：只创建 V2 候选稿并等待 owner 审批，不会自动发布。
+daily_discovery_enabled = false
+daily_discovery_seconds = 86400
+daily_discovery_max_topics = 2
+daily_discovery_max_age_hours = 48
+daily_discovery_feed_limit = 50
+# 额外一次独立模型审稿；仅在确定性检查通过后调用，失败会阻止提交而不是放行。
+# 默认关闭，接入真实模型并确认 token 预算后再打开。
+semantic_review = false
+
+# 【委托选题】可信域名检索不到时，模型可对当前这一条选题建议官方域名并补充搜索一次。
+# 建议默认关闭；开启后也只在单条选题内生效，不会写入长期可信源，最终仍需 owner 审批。
+[topics]
+# 每个本地自然日最多接受的选题请求数；按历史记录计数，不因服务重启清零。
+max_per_day = 5
+# 旧的单轮“模型补域名”路径保留用于历史配置；当前 S2 使用一次结构化
+# 研究计划和一次批量来源身份判定，两者共享下方抓取/预算上限。
+model_source_review = false
+model_source_min_confidence = 0.7
+model_source_max_domains = 3
+model_source_max_output_tokens = 500
+model_plan = true
+model_plan_max_output_tokens = 700
+model_identity = true
+identity_max_output_tokens = 1800
+identity_cache_hours = 24
+identity_min_confidence = 0.6
+# P0 adaptive research：首轮计划后最多补 2 个检索式（官方源/独立来源/
+# 关键数字/反方覆盖）；只增加观察，不降低正文、时效、来源身份或审批门槛。
+adaptive_research = false
+adaptive_max_queries = 2
+# 写稿因“证据不足”拒绝时做一次有界补检；默认关闭，补检仍受来源/时效/身份/预算约束。
+auto_rescue = false
+rescue_max_fetch = 2
+research_cache_hours = 6
+analysis_max_age_hours = 43200
+# AIHot discovery: original links first; summaries are labelled aggregators.
+aihot_enabled = true
+aihot_auto_match = true
+aihot_feed_url = "https://aihot.news/feed.xml"
+aihot_max_items = 50
+
+# 【网络】超时、响应大小上限、同站限速、重试与退避。
+# allow_private_hosts 只放行明确需要的本机服务；新闻源永远不要加进来。
+[network]
+timeout_seconds = 20
+max_fetch_bytes = 2097152
+min_host_interval_seconds = 2.0
+max_retries = 2
+backoff_base_seconds = 1.0
+backoff_max_seconds = 20.0
+allow_private_hosts = []
+user_agent = "BotOperator/0.1 (+personal account; contact: operator)"
+
+# 【预算】美元计价。unknown 用量按预留金额计入，避免预算被悄悄突破。
+[budget]
+daily_usd = 0.10
+max_calls_per_day = 40
+input_usd_per_million = 0.30
+output_usd_per_million = 1.20
+reserve_unknown_usd = 0.005
+max_output_tokens = 1800
+
+# 【模型】DeepSeek 的 key 从 DEEPSEEK_API_KEY 或 secrets.toml 读取。
+[llm]
+provider = "deepseek"
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com"
+timeout_seconds = 60
+max_retries = 2
+temperature = 0.5
+# Short JSON drafts: explicitly disable thinking so max_tokens is not consumed
+# by reasoning. The official API default is thinking enabled.
+thinking_disabled = true
+
+# 【通知】lark = 飞书。需要应用凭据和 owner 的 open_id。
+[notify]
+provider = "lark"
+fake_dir = "var/notifications"
+
+# 【飞书】owner_open_id 只能填“批准人本人”的 open_id；
+# chat_id 是消息投递的会话，不能拿来冒充 owner。
+# require_p2p=true：只认私聊里的批准，群聊里谁说都不算。
+[notify.lark]
+domain = "https://open.feishu.cn"
+owner_open_id = ""
+chat_id = ""
+require_p2p = true
+
+# 【发布】provider=xiaohongshu + live_enabled=true 只是其中两道开关。
+# 还要 app.mode=live、环境变量 BOT_ALLOW_REAL_PUBLISH=1、
+# 非 fixture/fake 管线，以及 owner 对最终版本的批准。
+[publisher]
+provider = "xiaohongshu"
+# Keep false until the account is really logged in and you have approved a
+# specific final work.  Setting this alone is not enough: the environment must
+# also contain BOT_ALLOW_REAL_PUBLISH=1.
+live_enabled = false
+export_dir = "var/exports"
+
+# 【小红书桥接】指向本机桥接服务；token 只从环境变量/secrets 读取。
+[publisher.xiaohongshu]
+base_url = "http://127.0.0.1:18060"
+login_status_path = "/api/v1/login/status"
+user_me_path = "/api/v1/user/me"
+# Documented /api/v1/user/me field: data.data.userBasicInfo.redId (public
+# account number). This is not an immutable user_id; leave blank until you
+# read the redId from that exact response (or set XHS_EXPECTED_RED_ID).
+expected_red_id = ""
+publish_path = "/api/v1/publish"
+timeout_seconds = 60
+connect_timeout_seconds = 8
+# Optional Docker bridge path mapping.  Leave both commented out for the native
+# Windows bridge, which receives absolute host image paths unchanged.  When the
+# bridge container mounts <project>\var\drafts read-only at /app/images, set
+# both values together; only the relative path below the host root is sent:
+#   image_host_root = "var/drafts"
+#   image_container_root = "/app/images"
+# The host root must resolve inside the project.  The container root must be an
+# absolute, normalized POSIX path.  Setting only one of them is rejected.
+# image_host_root = "var/drafts"
+# image_container_root = "/app/images"
+
+# 【控制台】必须是 127.0.0.1；改成 0.0.0.0 会被配置校验直接拒绝。
+[console]
+enabled = true
+host = "127.0.0.1"
+port = 8765
+session_ttl_minutes = 120
+allow_non_loopback = false
+
+# 【配图】卡片尺寸、中文字体回退列表、最多几张。超限报错，不截断。
+[render]
+width = 1080
+height = 1440
+margin = 72
+title_font = "C:/Windows/Fonts/msyhbd.ttc"
+body_font = "C:/Windows/Fonts/msyh.ttc"
+fallback_fonts = ["C:/Windows/Fonts/simhei.ttf", "C:/Windows/Fonts/Deng.ttf"]
+max_cards = 6
+
+# 【写作】标题和正文的长度上限。
+[writer]
+title_max_chars = 20
+body_max_chars = 1000
+
+# 【读者】目标读者画像，写稿时作为语气和深度依据。
+[audience]
+description = "给中文普通用户和独立开发者讲明白 AI 工具变化"
+
+# 【评分】入选阈值；标题相似度阈值用于判重。
+[scoring]
+min_score = 0.45
+title_similarity_threshold = 0.56
+
+# Prefer direct official RSS feeds.  Verify each URL and its terms before use;
+# do not scrape or republish AIHOT's online summary library.
+# 【来源】优先用官方 RSS；使用前确认 URL 和转载条款。
+# 不要抓取或搬运 AIHOT 的在线摘要库。
+[[sources]]
+name = "OpenAI News"
+url = "https://openai.com/news/rss.xml"
+kind = "rss"
+trust_tier = 1
+enabled = true
+
+# trust_tier 越小越可信，评分时会略微加权。
+[[sources]]
+name = "Hugging Face Blog"
+url = "https://huggingface.co/blog/feed.xml"
+kind = "rss"
+trust_tier = 2
+enabled = true
+
+# 注意：Google 系域名在本机网络环境可能无法访问；
+# 如果连不上，doctor 会把它标成来源异常，不影响其他来源。
+[[sources]]
+name = "Google AI Blog"
+url = "https://blog.google/technology/ai/rss/"
+kind = "rss"
+trust_tier = 1
+enabled = true
+
+# Optional alternate collection source: DeepSeek Search/Fetch on the fixed
+# official https://api.deepseek.com endpoint, using DEEPSEEK_API_KEY.
+# Result URLs must match allowed_domains; private/local/credentialed URLs are
+# rejected. Every physical search/fetch HTTP attempt reserves a fixed USD
+# amount before network I/O. Leave enabled=false until you have checked the
+# query and source domains.
+[[sources]]
+name = "DeepSeek Search"
+# Do not put a date in this query. The adapter appends a bounded
+# after:YYYY-MM-DD filter from the injected clock on every fetch, and keeps
+# each result's original publication date (missing dates stay unknown).
+query = "AI 工具 发布"
+kind = "deepseek_search"
+trust_tier = 2
+enabled = false
+max_results = 3
+max_fetches = 1
+fetch_content = true
+# lookback_days is bounded (1..30) and defaults to 3.
+lookback_days = 3
+# Exact hostname match by default: openai.com does not allow
+# community.openai.com. Add "*.openai.com" only when the subdomain is an
+# explicit, trusted official source.
+allowed_domains = ["openai.com", "deepmind.google", "huggingface.co"]
