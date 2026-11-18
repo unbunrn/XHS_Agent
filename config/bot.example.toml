@@ -59,6 +59,8 @@ max_queued_topics = 3
 max_pending_approvals = 3
 max_candidates_per_round = 3
 max_publish_per_day = 1
+# Per-task hard cap on publish attempts; a safe retry does not consume another work slot.
+max_publish_attempts_per_task = 3
 max_age_hours = 72
 event_window_days = 7
 poll_interval_seconds = 1800
@@ -300,3 +302,18 @@ lookback_days = 3
 # community.openai.com. Add "*.openai.com" only when the subdomain is an
 # explicit, trusted official source.
 allowed_domains = ["openai.com", "deepmind.google", "huggingface.co"]
+
+[publication_agent]
+# Approved artifact -> durable task -> bounded diagnosis/recovery.
+# This never bypasses the approval or publish gate.
+enabled = false
+max_steps = 8
+max_model_calls = 12
+max_daily_model_calls = 100
+max_invalid_decisions = 2
+max_retries = 3
+retry_base_seconds = 30
+retry_max_seconds = 1800
+login_wait_seconds = 300
+owner_wait_seconds = 3600
+task_ttl_seconds = 86400

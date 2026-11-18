@@ -85,8 +85,31 @@ def _attempts_today(
     start, end = local_day_bounds_utc(clock.now(), config.timezone_name)
     # Only an explicitly reconciled non-publication releases the daily slot.
     # Ordinary failures and unknown/in-flight attempts still count conservatively.
+    # Count works, not retries: a safe retry of the same frozen package must
+    # not consume another daily slot. Schema 10 has no task id, so fall back to
+    # the legacy attempt count there. Legacy attempts without a task id also
+    # count once per approval.
+    rows = (
+        conn.execute("PRAGMA table_info(publish_attempts)").fetchall()
+        if conn is not None else
+        db.fetchall("PRAGMA table_info(publish_attempts)")
+    )
+    # sqlite3.Row supports mapping access; a raw sqlite3.Connection returns
+    # tuples.  Keep this helper usable from both the Runtime and the legacy
+    # direct-connection quota tests.
+    columns = {
+        str(row["name"]) if hasattr(row, "keys") else str(row[1])
+        for row in rows
+    }
+    if "publication_task_id" in columns:
+        counted = (
+            "COUNT(DISTINCT CASE WHEN p.publication_task_id IS NOT NULL "
+            "THEN 'task:' || p.publication_task_id ELSE 'approval:' || p.approval_id END)"
+        )
+    else:
+        counted = "COUNT(*)"
     sql = (
-        "SELECT COUNT(*) FROM publish_attempts p WHERE p.created_at >= ? AND p.created_at < ? "
+        "SELECT " + counted + " FROM publish_attempts p WHERE p.created_at >= ? AND p.created_at < ? "
         "AND NOT (p.state='failed' AND EXISTS (SELECT 1 FROM approvals a "
         "WHERE a.id=p.approval_id AND a.status='reconciled_not_published'))"
     )
@@ -248,6 +271,7 @@ def _artifact_check(
     draft: sqlite3.Row,
     *,
     conn: sqlite3.Connection | None = None,
+    allow_reopen_draft: bool = False,
 ) -> tuple[bool, str, list[dict[str, Any]]]:
     # “验货”：批准的是哪一版，现在发的就必须是哪一版。
     # 先让 approvals.verify_approval_artifact 把审批指纹、正文哈希重算一遍，
@@ -259,7 +283,9 @@ def _artifact_check(
     # 草稿可能被改过并生成了新版本，而审批还停留在旧版本。
     if int(draft["version"]) != int(approval["draft_version"]):
         return False, "draft version differs from approval", images
-    if str(draft["status"]) != "approved":
+    if str(draft["status"]) != "approved" and not (
+        allow_reopen_draft and str(draft["status"]) in {"failed", "publish_unknown"}
+    ):
         return False, f"draft status is {draft['status']}, not approved", images
     if not draft["images_sha256"]:
         return False, "draft has no image digest", images
@@ -279,11 +305,13 @@ def _artifact_check(
     return True, "ok", images
 
 
-def _due_reason(approval: sqlite3.Row, clock: Clock) -> tuple[bool, str]:
+def _due_reason(approval: sqlite3.Row, clock: Clock, *, allow_reopen: bool = False) -> tuple[bool, str]:
     # 判断“现在该不该发”：必须 approved、时间戳可解析、还没过期、
     # 且已到计划时间。scheduled_at 是“最早可以发”的时间，
     # expires_at 是“最晚必须发”的时间，两者之间才是窗口。
-    if approval["status"] != "approved":
+    if approval["status"] != "approved" and not (
+        allow_reopen and approval["status"] in {"failed", "publish_unknown"}
+    ):
         return False, f"approval status is {approval['status']}"
     now = clock.now()
     expires = parse_iso(approval["expires_at"])
@@ -299,6 +327,34 @@ def _due_reason(approval: sqlite3.Row, clock: Clock) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _frozen_package_check(task: sqlite3.Row, draft: sqlite3.Row, approval: sqlite3.Row, images: list[dict[str, Any]]) -> tuple[bool, str]:
+    package = json_loads(task["approved_package_json"], {}) or {}
+    expected_tags = list((json_loads(draft["body_json"], {}) or {}).get("tags") or [])
+    if str(package.get("title") or "") != str(draft["title"]):
+        return False, "frozen package title no longer matches draft"
+    if str(package.get("body_sha256") or "") != str(approval["body_sha256"]):
+        return False, "frozen package body hash changed"
+    if int(package.get("draft_version") or 0) != int(draft["version"]):
+        return False, "frozen package draft version changed"
+    if list(package.get("tags") or []) != expected_tags:
+        return False, "frozen package tags changed"
+    if str(package.get("visibility") or "public") != "public":
+        return False, "frozen package visibility is not public"
+    frozen_images = [
+        (int(i.get("ordinal")), str(i.get("path") or ""), str(i.get("sha256") or ""))
+        for i in package.get("images") or []
+    ]
+    actual_images = [
+        (int(i["ordinal"]), str(i["path"]), str(i["sha256"]))
+        for i in sorted(images, key=lambda x: int(x["ordinal"]))
+    ]
+    if frozen_images != actual_images:
+        return False, "frozen package images changed or out of order"
+    if str(package.get("body_sha256") or "") != str(approval["body_sha256"]):
+        return False, "frozen package approval hash changed"
+    return True, "ok"
+
+
 def _validate_publish_conn(
     db: Database,
     conn: sqlite3.Connection,
@@ -306,6 +362,13 @@ def _validate_publish_conn(
     clock: Clock,
     approval: sqlite3.Row,
     publisher: Publisher,
+    *,
+    task_id: int | None = None,
+    attempt_no: int | None = None,
+    allow_reopen: bool = False,
+    task_generation: int | None = None,
+    package_hash: str | None = None,
+    lease_owner: str | None = None,
 ) -> tuple[bool, str, sqlite3.Row | None, list[dict[str, Any]]]:
     """All publish preconditions, evaluated through one database connection.
 
@@ -315,13 +378,18 @@ def _validate_publish_conn(
     """
     if bool(config.get("app.pause_all", False)):
         return False, "global pause is on", None, []
-    due, reason = _due_reason(approval, clock)
+    due, reason = _due_reason(
+        approval, clock, allow_reopen=bool(task_id is not None and allow_reopen)
+    )
     if not due:
         return False, reason, None, []
     draft = conn.execute("SELECT * FROM drafts WHERE id=?", (approval["draft_id"],)).fetchone()
     if draft is None:
         return False, "draft no longer exists", None, []
-    ok, reason, images = _artifact_check(db, approval, draft, conn=conn)
+    ok, reason, images = _artifact_check(
+        db, approval, draft, conn=conn,
+        allow_reopen_draft=bool(task_id is not None and allow_reopen),
+    )
     if not ok:
         return False, reason, draft, images
     ok, reason = _mode_freshness_check(db, config, clock, draft, conn=conn)
@@ -330,6 +398,9 @@ def _validate_publish_conn(
     ok, reason = _source_check(db, draft, publisher, conn=conn)
     if not ok:
         return False, reason, draft, images
+    configured_account = str(config.account().get("id") or "")
+    if configured_account and str(approval["account_id"]) != configured_account:
+        return False, "approval belongs to a different account", draft, images
     ok, reason = _account_check(config, publisher)
     if not ok:
         return False, reason, draft, images
@@ -341,20 +412,67 @@ def _validate_publish_conn(
         config.get(quota_key, 1)
     ):
         return False, "daily publish limit reached", draft, images
-    if _existing_attempt(db, int(approval["id"]), conn=conn) is not None:
-        return False, "a publish attempt already exists for this approval", draft, images
+    if task_id is None:
+        if _existing_attempt(db, int(approval["id"]), conn=conn) is not None:
+            return False, "a publish attempt already exists for this approval", draft, images
+    else:
+        task = conn.execute(
+            "SELECT state, cancel_requested, generation, approved_package_hash, "
+            "active_attempt_id, lease_owner, approved_package_json FROM publication_tasks WHERE id=?",
+            (int(task_id),),
+        ).fetchone()
+        if task is None:
+            return False, "publication task does not exist", draft, images
+        if task["state"] not in {"ready", "diagnosing", "retry_wait"}:
+            return False, "publication task is not in an executable state", draft, images
+        if int(task["cancel_requested"] or 0):
+            return False, "publication task cancellation requested", draft, images
+        if task_generation is not None and int(task["generation"]) != int(task_generation):
+            return False, "publication task generation changed", draft, images
+        if package_hash is not None and str(task["approved_package_hash"]) != str(package_hash):
+            return False, "publication task package changed", draft, images
+        if lease_owner is not None and str(task["lease_owner"] or "") != str(lease_owner):
+            return False, "publication task lease changed", draft, images
+        ok, reason = _frozen_package_check(task, draft, approval, images)
+        if not ok:
+            return False, reason, draft, images
+        if attempt_no is not None:
+            cap = int(config.get("limits.max_publish_attempts_per_task", 3))
+            prior = int(conn.execute(
+                "SELECT COUNT(*) FROM publish_attempts WHERE publication_task_id=?",
+                (int(task_id),),
+            ).fetchone()[0])
+            if prior >= cap:
+                return False, "publication task attempt limit reached", draft, images
+        if task["active_attempt_id"] is not None:
+            return False, "publication task already has an active attempt", draft, images
+        unresolved = conn.execute(
+            "SELECT 1 FROM publish_attempts WHERE publication_task_id=? "
+            "AND state IN ('publishing','unknown') LIMIT 1",
+            (int(task_id),),
+        ).fetchone()
+        if unresolved is not None:
+            return False, "publication task has an unresolved attempt", draft, images
     return True, "ok", draft, images
 
 
 def validate_publish(
-    db: Database, config: Config, clock: Clock, approval: sqlite3.Row, publisher: Publisher
+    db: Database, config: Config, clock: Clock, approval: sqlite3.Row, publisher: Publisher,
+    *, task_id: int | None = None, attempt_no: int | None = None, allow_reopen: bool = False,
+    task_generation: int | None = None, package_hash: str | None = None,
+    lease_owner: str | None = None,
 ) -> tuple[bool, str, sqlite3.Row | None, list[dict[str, Any]]]:
     # 只读检查，不改数据库。返回 (是否通过, 原因, 草稿行, 图片清单)。
     # 顺序有讲究：先查最便宜的全局开关，再查时间，再查内容，
     # 最后查账号和限额——越贵的检查越靠后，失败时也更容易解释。
     # 注意：这里通过不代表一定能发，claim_publish 还会在事务里再核对一次。
     with db.read() as conn:
-        return _validate_publish_conn(db, conn, config, clock, approval, publisher)
+        return _validate_publish_conn(
+            db, conn, config, clock, approval, publisher,
+            task_id=task_id, attempt_no=attempt_no, allow_reopen=allow_reopen,
+            task_generation=task_generation, package_hash=package_hash,
+            lease_owner=lease_owner,
+        )
 
 
 @dataclass
@@ -377,6 +495,14 @@ def claim_publish(
     clock: Clock,
     approval_id: int,
     publisher: Publisher,
+    *,
+    task_id: int | None = None,
+    attempt_no: int | None = None,
+    allow_reopen: bool = False,
+    retry_basis: str = "",
+    task_generation: int | None = None,
+    package_hash: str | None = None,
+    lease_owner: str | None = None,
 ) -> tuple[PublishClaim | None, str]:
     """Transactionally validate and move approved -> publishing.
 
@@ -408,11 +534,19 @@ def claim_publish(
             # 事务内重新读一遍。外面拿到的 approval 可能已经过期，
             # 比如另一个进程刚刚处理过，或者用户刚撤回。
             fresh = conn.execute("SELECT * FROM approvals WHERE id=?", (approval_id,)).fetchone()
-            if fresh is None or fresh["status"] != "approved":
+            if fresh is None:
+                return None, "approval changed before claim"
+            allowed_statuses = {"approved"}
+            if task_id is not None and allow_reopen:
+                allowed_statuses |= {"failed", "publish_unknown"}
+            if fresh["status"] not in allowed_statuses:
                 return None, "approval changed before claim"
             # 所有 DB 条件都在同一个写事务连接上重新检查。
             ok, reason, current_draft, images = _validate_publish_conn(
-                db, conn, config, clock, fresh, publisher
+                db, conn, config, clock, fresh, publisher,
+                task_id=task_id, attempt_no=attempt_no, allow_reopen=allow_reopen,
+                task_generation=task_generation, package_hash=package_hash,
+                lease_owner=lease_owner,
             )
             if not ok or current_draft is None:
                 return None, reason or "draft changed before claim"
@@ -429,34 +563,66 @@ def claim_publish(
             )
             if expected != fresh["fingerprint"]:
                 return None, "approval fingerprint mismatch at claim"
-            # 去重键用审批 ID：一个审批只允许一条发布尝试。
-            # 这是最后一道并发保护，靠数据库唯一约束兜底。
-            dedupe_key = f"approval:{int(fresh['id'])}"
-            cur = conn.execute(
-                "INSERT INTO publish_attempts(approval_id, draft_id, dedupe_key, platform, account_id, "
-                "mode, state, created_at, started_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, 'publishing', ?, ?, ?)",
-                (
-                    fresh["id"],
-                    fresh["draft_id"],
-                    dedupe_key,
-                    fresh["platform"],
-                    fresh["account_id"],
-                    publisher.mode,
-                    now,
-                    now,
-                    now,
-                ),
-            )
+            if task_id is None:
+                dedupe_key = f"approval:{int(fresh['id'])}"
+            else:
+                if attempt_no is None:
+                    attempt_no = int(conn.execute(
+                        "SELECT COALESCE(MAX(attempt_no),0)+1 FROM publish_attempts "
+                        "WHERE publication_task_id=?", (int(task_id),)
+                    ).fetchone()[0])
+                dedupe_key = f"publication:{int(task_id)}:{int(attempt_no)}"
+            if task_id is None:
+                # Compatibility: an un-migrated live DB (schema 10) has no
+                # publication_task_id/attempt_no/dispatch_state/retry_basis
+                # columns yet. The old path must keep working until the
+                # operator explicitly applies migration 11.
+                cur = conn.execute(
+                    "INSERT INTO publish_attempts(approval_id, draft_id, dedupe_key, platform, account_id, "
+                    "mode, state, created_at, started_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'publishing', ?, ?, ?)",
+                    (
+                        fresh["id"],
+                        fresh["draft_id"],
+                        dedupe_key,
+                        fresh["platform"],
+                        fresh["account_id"],
+                        publisher.mode,
+                        now,
+                        now,
+                        now,
+                    ),
+                )
+            else:
+                cur = conn.execute(
+                    "INSERT INTO publish_attempts(approval_id, draft_id, dedupe_key, platform, account_id, "
+                    "mode, state, created_at, started_at, updated_at, publication_task_id, attempt_no, "
+                    "dispatch_state, retry_basis) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'publishing', ?, ?, ?, ?, ?, 'not_dispatched', ?)",
+                    (
+                        fresh["id"],
+                        fresh["draft_id"],
+                        dedupe_key,
+                        fresh["platform"],
+                        fresh["account_id"],
+                        publisher.mode,
+                        now,
+                        now,
+                        now,
+                        task_id,
+                        attempt_no,
+                        retry_basis,
+                    ),
+                )
             attempt_id = int(cur.lastrowid)
             moved = conn.execute(
-                "UPDATE approvals SET status='publishing' WHERE id=? AND status='approved'",
+                "UPDATE approvals SET status='publishing' WHERE id=? AND status IN ('approved','failed','publish_unknown')",
                 (fresh["id"],),
             )
             if moved.rowcount != 1:
                 raise sqlite3.IntegrityError("approval changed while claiming")
             moved = conn.execute(
-                "UPDATE drafts SET status='publishing', updated_at=? WHERE id=? AND status='approved'",
+                "UPDATE drafts SET status='publishing', updated_at=? WHERE id=? AND status IN ('approved','failed','publish_unknown')",
                 (now, fresh["draft_id"]),
             )
             if moved.rowcount != 1:
@@ -465,6 +631,12 @@ def claim_publish(
                 "UPDATE events SET status='publishing' WHERE id=?",
                 (current_draft["event_id"],),
             )
+            if task_id is not None:
+                conn.execute(
+                    "UPDATE publication_tasks SET active_attempt_id=?, state='submitting', updated_at=? "
+                    "WHERE id=? AND active_attempt_id IS NULL",
+                    (attempt_id, now, int(task_id)),
+                )
             # 审计记录也写在同一事务里：要么“占坑 + 审计”一起成功，
             # 要么一起回滚，不会出现有坑位却没记录的情况。
             audit(
@@ -730,6 +902,26 @@ def _finish(
             "UPDATE events SET status=? WHERE id=(SELECT event_id FROM drafts WHERE id=?)",
             (event_status, approval["draft_id"]),
         )
+        # Older (schema 10) attempts do not have publication_task_id at all.
+        # Reading it by name would raise KeyError on an old row.
+        task_id = attempt["publication_task_id"] if "publication_task_id" in attempt.keys() else None
+        if task_id is not None:
+            task_state = (
+                "published" if state == "published" else
+                "simulated" if state == "simulated" else
+                "waiting_owner" if state == "unknown" else
+                "retry_wait"
+            )
+            conn.execute(
+                "UPDATE publication_tasks SET active_attempt_id=NULL, state=?, updated_at=? "
+                "WHERE id=? AND active_attempt_id=?",
+                (task_state, now, task_id, attempt["id"]),
+            )
+        if "failure_class" in attempt.keys():
+            conn.execute(
+                "UPDATE publish_attempts SET failure_class=?, retryable=? WHERE id=?",
+                (outcome.failure_class or None, 1 if outcome.retryable else 0, attempt["id"]),
+            )
         audit(
             conn,
             "publish_gate",
@@ -766,6 +958,8 @@ def _finish(
         "external_post_id": external_id,
         "external_url": external_url,
         "simulated": state == "simulated",
+        "failure_class": outcome.failure_class,
+        "retryable": bool(outcome.retryable),
         "attempt_id": int(attempt["id"]),
         "approval_code": approval["code"],
         "result_id": result.get("result_id"),
@@ -781,6 +975,14 @@ def publish_approval(
     approval_id: int,
     *,
     publisher: Publisher | None = None,
+    task_id: int | None = None,
+    attempt_no: int | None = None,
+    allow_reopen: bool = False,
+    retry_basis: str = "",
+    task_generation: int | None = None,
+    package_hash: str | None = None,
+    lease_owner: str | None = None,
+    before_send: Any | None = None,
 ) -> dict[str, Any]:
     # 一次完整发布的入口：检查 -> 占坑 -> 调用发布器 -> 记账。
     # publisher 参数允许测试注入假发布器；正常运行时传 None，
@@ -790,7 +992,7 @@ def publish_approval(
         raise PublishGateError("approval not found")
     # 已经尝试过就直接返回，不做任何网络调用。
     # 这是“绝不重发”最外层、也最容易看懂的一道检查。
-    if _existing_attempt(db, int(approval["id"])) is not None:
+    if task_id is None and _existing_attempt(db, int(approval["id"])) is not None:
         result = {
             "ok": False,
             "state": "already_attempted",
@@ -837,7 +1039,12 @@ def publish_approval(
             reason_code="publisher_not_configured",
         )
         return _attach({"ok": False, "state": "blocked", "detail": str(exc)}, gate)
-    ok, reason, draft, images = validate_publish(db, config, clock, approval, publisher)
+    ok, reason, draft, images = validate_publish(
+        db, config, clock, approval, publisher,
+        task_id=task_id, attempt_no=attempt_no, allow_reopen=allow_reopen,
+        task_generation=task_generation, package_hash=package_hash,
+        lease_owner=lease_owner,
+    )
     if not ok or draft is None:
         expired = reason == "approval expired"
         if expired:
@@ -855,7 +1062,12 @@ def publish_approval(
             {"ok": False, "state": "expired" if expired else "blocked", "detail": reason},
             gate,
         )
-    claim, claim_reason = claim_publish(db, config, clock, int(approval["id"]), publisher)
+    claim, claim_reason = claim_publish(
+        db, config, clock, int(approval["id"]), publisher,
+        task_id=task_id, attempt_no=attempt_no, allow_reopen=allow_reopen,
+        retry_basis=retry_basis, task_generation=task_generation,
+        package_hash=package_hash, lease_owner=lease_owner,
+    )
     if claim is None:
         expired = claim_reason == "approval expired"
         if expired:
@@ -891,6 +1103,14 @@ def publish_approval(
         scheduled_at=str(fresh_approval["scheduled_at"]),
         tags=list((json_loads(fresh_draft["body_json"], {}) or {}).get("tags") or []),
     )
+    # 记录发送前的账号/平台基线。回调失败不能阻止发送（否则会制造
+    # 一个“没发却占着 attempt”的状态），但会留下 read_ok=false 的证据，
+    # 后续重启核对只能保持 unknown。
+    if before_send is not None:
+        try:
+            before_send(claim)
+        except Exception:
+            pass
     # 到这里坑位已经占好，无论发布器怎么炸，都必须给出一个确定的结果，
     # 绝不能让记录永远停在 publishing。
     # 异常映射规则：
@@ -899,16 +1119,39 @@ def publish_approval(
     #   NotConfigured  -> failed（配置问题，请求根本没发）
     #   其他任何异常  -> unknown（最保守：无法判断就不假装失败）
     try:
+        if task_id is not None:
+            with db.tx() as conn:
+                conn.execute(
+                    "UPDATE publish_attempts SET dispatch_state='dispatched', updated_at=? "
+                    "WHERE id=? AND dispatch_state='not_dispatched'",
+                    (to_iso(clock.now()), attempt["id"]),
+                )
         outcome = publisher.publish(request)
     except PublishFailed as exc:
-        outcome = PublishOutcome(state="failed", detail=f"publisher failed: {exc}")
+        failure_class = str(exc.code or "rejected")
+        # Only an explicit pre-send/connect failure may be retried.  Login,
+        # asset and platform-rejection failures require owner/repair action.
+        retryable = bool(exc.retryable and failure_class in {
+            "not_dispatched", "connection_before_send", "bridge_unavailable"
+        })
+        outcome = PublishOutcome(
+            state="failed", detail=f"publisher failed: {exc}",
+            failure_class=failure_class, retryable=retryable,
+        )
     except PublishUnknown as exc:
-        outcome = PublishOutcome(state="unknown", detail=f"publish outcome unknown: {exc}")
+        outcome = PublishOutcome(
+            state="unknown", detail=f"publish outcome unknown: {exc}",
+            failure_class="unknown_result", retryable=False,
+        )
     except NotConfigured as exc:
-        outcome = PublishOutcome(state="failed", detail=f"publisher not configured: {exc}")
+        outcome = PublishOutcome(
+            state="failed", detail=f"publisher not configured: {exc}",
+            failure_class="config", retryable=False,
+        )
     except Exception as exc:  # noqa: BLE001 - never assume a network exception means success
         outcome = PublishOutcome(
-            state="unknown", detail=f"publisher raised {type(exc).__name__}: {exc}; not retried"
+            state="unknown", detail=f"publisher raised {type(exc).__name__}: {exc}; not retried",
+            failure_class="unknown_result", retryable=False,
         )
     return _finish(db, config, clock, attempt, fresh_approval, outcome)
 

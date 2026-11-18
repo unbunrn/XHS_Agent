@@ -615,4 +615,85 @@ CREATE INDEX ix_creator_agent_materials_run
     ON creator_agent_materials(run_key, material_id);
 """,
     ),
+    (
+        11,
+        r"""
+-- Publication recovery agent: one durable business task per approved package.
+CREATE TABLE publication_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    account_id TEXT NOT NULL,
+    approval_id INTEGER NOT NULL REFERENCES approvals(id),
+    draft_id INTEGER NOT NULL REFERENCES drafts(id),
+    draft_version INTEGER NOT NULL,
+    creator_run_key TEXT,
+    approved_package_json TEXT NOT NULL,
+    approved_package_hash TEXT NOT NULL,
+    work_key TEXT,
+    generation INTEGER NOT NULL DEFAULT 1,
+    state TEXT NOT NULL,
+    cancel_requested INTEGER NOT NULL DEFAULT 0,
+    next_wake_at TEXT,
+    wait_reason TEXT,
+    active_attempt_id INTEGER,
+    last_error_class TEXT,
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    lease_owner TEXT,
+    lease_until TEXT,
+    terminal_evidence_ref TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(approval_id, approved_package_hash)
+);
+CREATE INDEX ix_publication_tasks_state
+    ON publication_tasks(state, next_wake_at);
+CREATE UNIQUE INDEX ux_publication_task_work_live
+    ON publication_tasks(work_key)
+    WHERE work_key IS NOT NULL AND state != 'cancelled';
+
+CREATE TABLE publication_agent_steps (
+    task_id INTEGER NOT NULL REFERENCES publication_tasks(id),
+    seq INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    args_json TEXT NOT NULL,
+    intent_summary TEXT,
+    observation_json TEXT,
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (task_id, seq)
+);
+
+CREATE TABLE publication_owner_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES publication_tasks(id),
+    question TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'open',
+    expires_at TEXT,
+    inbound_message_id TEXT,
+    answer_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX ix_publication_owner_requests_task
+    ON publication_owner_requests(task_id, state);
+
+ALTER TABLE publish_attempts ADD COLUMN publication_task_id INTEGER;
+ALTER TABLE publish_attempts ADD COLUMN attempt_no INTEGER;
+ALTER TABLE publish_attempts ADD COLUMN dispatch_state TEXT;
+ALTER TABLE publish_attempts ADD COLUMN retry_basis TEXT;
+ALTER TABLE publish_attempts ADD COLUMN request_correlation_id TEXT;
+ALTER TABLE publish_attempts ADD COLUMN quota_reservation_json TEXT;
+ALTER TABLE publish_attempts ADD COLUMN failure_class TEXT;
+ALTER TABLE publish_attempts ADD COLUMN retryable INTEGER;
+ALTER TABLE publish_attempts ADD COLUMN pre_send_baseline_json TEXT;
+CREATE UNIQUE INDEX ux_publish_attempt_task_no
+    ON publish_attempts(publication_task_id, attempt_no)
+    WHERE publication_task_id IS NOT NULL;
+CREATE UNIQUE INDEX ux_publication_task_active_attempt
+    ON publication_tasks(active_attempt_id)
+    WHERE active_attempt_id IS NOT NULL;
+""",
+    ),
 ]

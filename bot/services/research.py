@@ -138,9 +138,17 @@ def sync_sources(db: Database, config: Config) -> int:
         configured = {str(e["name"]).strip() for e in config.enabled_sources()}
         # Commissioned sources are owned by durable topic requests, not the
         # recurring-source config. Preserve their state, including explicit disable.
+        codes = {str(r["code"]) for r in conn.execute("SELECT code FROM topic_requests").fetchall()}
+        try:
+            codes.update(
+                "v2-" + str(r["run_key"])
+                for r in conn.execute("SELECT run_key FROM creator_agent_runs").fetchall()
+            )
+        except sqlite3.OperationalError:
+            pass
         commissioned = {
-            (_topic_source_name(str(r["code"])), "deepseek-search://topic/" + str(r["code"]))
-            for r in conn.execute("SELECT code FROM topic_requests").fetchall()
+            (_topic_source_name(code), "deepseek-search://topic/" + code)
+            for code in codes
         }
         for row in conn.execute("SELECT id, name, url, kind FROM sources").fetchall():
             if row["kind"] == "deepseek_search" and (row["name"], row["url"]) in commissioned:

@@ -150,6 +150,11 @@ class PublishOutcome:
     external_post_id: str | None = None
     external_url: str | None = None
     receipt: dict[str, Any] = field(default_factory=dict)
+    # Structured failure metadata.  The agent must not infer retryability
+    # from human-readable error strings.  ``failure_class`` is one of
+    # not_dispatched/login_expired/asset_missing/rejected/unknown_result.
+    failure_class: str = ""
+    retryable: bool = False
 
     @property
     def is_real(self) -> bool:

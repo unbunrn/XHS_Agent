@@ -1,6 +1,12 @@
 # 实现状态（IMPLEMENTATION_STATUS）
 
-## 最新状态（2026-11-16）
+## 最新状态（2026-11-18）
+
+- **发布恢复 Agent Round-2 反例与离线演示（离线）**：已复现并修复“预发送 identity 缺失却按同标题认领成功”和“暂停任务在 0 预算下被 `检查原因` 改成 waiting_owner”。新增显式 `lookup_published_notes_verified`（identity+notes 同源）、严格预发送基线、诊断只读/独立工具集/预算与异常不改主状态、unknown `修复并重试` 只排正式对账、不重置；即时确认与重启对账共用账号证据规则。离线演示 `tests/test_publication_round2_demo.py` 覆盖资产缺失→同字节恢复→一次 POST→成功通知重启→重复事件不重发，以及跨账号同标题不认领、超时 unknown→同事务自动入队→队列退避→重启 worker 认领原 attempt（无需主人发消息）；主人同时“修复”时复用同一 active 对账链，crash-window 由 startup 恢复缺 job。定向 **77/77**（517.425s）、主全量 **354/354**（943.785s，`var/tests/full_suite_round2_startup_attempt_source.log`）通过；migration 11 临时副本 `MIGRATION_REHEARSAL_OK`。**未部署、未迁移 live、未真实发布。** 详见 [Round-2 交付报告](delivery/PUBLICATION_AGENT_ROUND2_DELIVERY.md)、[回滚说明](delivery/PUBLICATION_AGENT_ROLLBACK.md)。
+- **发布与故障恢复 Agent R1–R6 返修 + handoff 反例（离线）**：已完成 R1（确定失败/unknown 分离）、R2（claim 事务最终 fence）、R3（预发送基线 + feed 对账、unknown 取消）、R4（批次/日预算、预留、唤醒去重、只读诊断）、R5（不可变资产 manifest/原子恢复）、R6（V2 来源归属、work_key、配额、冻结包、simulated 分离）。另修复“诊断派生 job 越权发布”“旧同标题笔记误认成功”两个 handoff 反例。定向 publication/xhs 回归 **71/71 OK（217.391s）**；主全量 **Ran 333 tests in 799.335s, OK**（日志 `var/tests/full_suite_publication_handoff_final.log`）。migration 11 仅在 live 临时副本演练（v10→v11、二次 init 幂等、integrity ok；新增 `pre_send_baseline_json`）。
+- 仍**未部署**：`publication_agent.enabled=false`，live DB 仍为 10，未真实发布/未重放历史失败稿；自然语言/无编号目标、桥接阶段日志/截图/toast/2 分钟 deadline、维护窗口回滚仍未完成。详见 [返修交付报告](delivery/PUBLICATION_AGENT_DELIVERY.md)、[handoff 补充报告](delivery/PUBLICATION_AGENT_HANDOFF_DELIVERY.md)、[架构](PUBLICATION_AGENT_ARCHITECTURE.md)、[使用](PUBLICATION_AGENT_USAGE.md)、[独立审查](delivery/PUBLICATION_AGENT_INDEPENDENT_REVIEW_20261118.md)。
+
+## 状态（2026-11-16）
 
 - **V2 每日自动发现已接回**：`creator_agent.daily_discovery_enabled=true`，worker 每 24h 入队 `creator_discovery`；AIHot feed → 过滤时效/去重 → `CreativeBrief.source_url` 原文链接 → 每候选一个 `creator_agent_run`。worker 会在 run 开始前预取一次原文作为种子材料，模型仍自行决定搜索/写稿/审稿；只生成 pending approval，不自动发布。旧 `collect`/`draft` 自动排期已停用，旧 handler 不再注册；历史数据保留。
 - 新增 `bot/services/creator_agent/discovery.py`、worker `creator_discovery` handler、`creator_agent.daily_discovery_*` 配置；`tests/test_creator_daily_discovery.py` 4/4 通过。

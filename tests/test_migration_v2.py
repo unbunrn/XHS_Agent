@@ -1,4 +1,4 @@
-"""Synthetic old-database rehearsal for Creator Agent V2 migrations 9–10."""
+"""Synthetic old-database rehearsal for Creator Agent V2 migrations 9–11."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from bot.schema import MIGRATIONS
 
 
 class MigrationV2Tests(TestCase):
-    def test_v8_to_v10_is_additive_and_idempotent(self):
+    def test_v8_to_v11_is_additive_and_idempotent(self):
         path = Path("var/tests") / "v2-migration-synthetic.sqlite3"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.unlink(missing_ok=True)
@@ -28,10 +28,10 @@ class MigrationV2Tests(TestCase):
         db.init()
         db.init()
         row = db.fetchone("SELECT MAX(version) AS v FROM schema_migrations")
-        self.assertEqual(int(row["v"]), 10)
+        self.assertEqual(int(row["v"]), 11)
         marker = db.fetchone("SELECT value FROM settings WHERE key='legacy.marker'")
         self.assertEqual(marker["value"], "keep-me")
-        for table in ("creator_agent_runs", "creator_agent_steps", "creator_agent_artifacts", "creator_agent_preferences", "creator_agent_materials"):
+        for table in ("creator_agent_runs", "creator_agent_steps", "creator_agent_artifacts", "creator_agent_preferences", "creator_agent_materials", "publication_tasks", "publication_agent_steps", "publication_owner_requests"):
             exists = db.fetchone("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
             self.assertIsNotNone(exists, table)
         draft_columns = {
@@ -43,7 +43,7 @@ class MigrationV2Tests(TestCase):
             "SELECT name FROM sqlite_master WHERE type='index' AND name='ux_drafts_submission_key'"
         )
         self.assertIsNotNone(index)
-        count = db.fetchone("SELECT COUNT(*) AS n FROM schema_migrations WHERE version=10")
+        count = db.fetchone("SELECT COUNT(*) AS n FROM schema_migrations WHERE version=11")
         self.assertEqual(int(count["n"]), 1)
         integrity = db.fetchone("PRAGMA integrity_check")
         self.assertEqual(integrity[0], "ok")

@@ -159,6 +159,13 @@ class Publisher:
     def health(self) -> dict[str, Any]:  # pragma: no cover - interface
         raise NotImplementedError
 
+    def lookup_published_notes_verified(self, *, limit: int = 20) -> dict[str, Any]:
+        # Adapters that cannot return identity and notes atomically must say so
+        # rather than letting callers infer trust from a separate feed read.
+        return {"ok": False, "read_ok": False, "identity_ok": False,
+                "account_identity": None, "notes": [],
+                "reason": "adapter does not provide a verified account feed"}
+
 
 class MockPublisher(Publisher):
     name = "mock"
@@ -357,7 +364,7 @@ class XiaohongshuPublisher(Publisher):
         symlink/junction escapes are refused before the publish POST.
         """
         if self.image_host_root is None or self.image_container_root is None:
-            raise PublishFailed("image path mapping is not configured", retryable=False)
+            raise PublishFailed("image path mapping is not configured", retryable=False, code="asset_missing")
         try:
             actual = self.config.resolve_path(image_path).resolve(strict=True)
         except (OSError, RuntimeError, ValueError) as exc:
@@ -510,6 +517,52 @@ class XiaohongshuPublisher(Publisher):
         )
         return result
 
+    def lookup_published_notes_verified(self, *, limit: int = 20) -> dict[str, Any]:
+        """Return the account feed and the identity that produced it.
+
+        The identity and the note list come from the same ``/user/me``
+        response.  Callers must not infer trust from a separately read list:
+        two independent reads could observe two different accounts.
+        """
+        if not self.token:
+            return {"ok": False, "read_ok": False, "identity_ok": False,
+                    "account_identity": None, "notes": [],
+                    "reason": "bridge token is missing; cannot verify account feed"}
+        try:
+            status, payload = self._get_json(self.user_me_path)
+        except Exception as exc:  # noqa: BLE001 - report without secrets
+            return {"ok": False, "read_ok": False, "identity_ok": False,
+                    "account_identity": None, "notes": [],
+                    "reason": f"account feed read failed: {type(exc).__name__}: {exc}"}
+        if status in {401, 403}:
+            return {"ok": False, "read_ok": False, "identity_ok": False,
+                    "account_identity": None, "notes": [],
+                    "reason": "bridge rejected the bearer token during account feed check"}
+        if status != 200 or payload.get("success") is False:
+            return {"ok": False, "read_ok": False, "identity_ok": False,
+                    "account_identity": None, "notes": [],
+                    "reason": f"account feed returned HTTP {status}"}
+        red_id = _extract_red_id(payload)
+        notes = _feed_notes(payload)
+        if notes is None:
+            return {"ok": False, "read_ok": False, "identity_ok": False,
+                    "account_identity": red_id, "notes": [],
+                    "reason": "account response contained no note cards"}
+        if not red_id:
+            return {"ok": False, "read_ok": True, "identity_ok": False,
+                    "account_identity": None, "notes": notes,
+                    "reason": "account response contained no verified redId"}
+        identity_ok = bool(self.expected_red_id and red_id == self.expected_red_id)
+        return {
+            "ok": identity_ok,
+            "read_ok": True,
+            "identity_ok": identity_ok,
+            "account_identity": red_id,
+            "notes": notes,
+            "reason": ("identity matches expected public redId" if identity_ok
+                       else "logged-in redId does not match expected_red_id"),
+        }
+
     def lookup_published_notes(self, *, since: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
         """Read the authenticated account's recent note feed.
 
@@ -549,15 +602,15 @@ class XiaohongshuPublisher(Publisher):
         before = self._pre_publish_feed_ids
         if before is None:
             return False, None
-        try:
-            status, payload = self._get_json(self.user_me_path)
-        except Exception:  # noqa: BLE001 - network failure stays unknown
+        # Reuse the same account+feed evidence rule as restart reconciliation:
+        # the identity and the note list must come from one verified response.
+        # A readable list from a different account is not evidence for this send.
+        verified = self.lookup_published_notes_verified(limit=50)
+        if not verified.get("read_ok") or not verified.get("identity_ok"):
             return False, None
-        if status != 200 or payload.get("success") is False:
+        if not self.expected_red_id or verified.get("account_identity") != self.expected_red_id:
             return False, None
-        notes = _feed_notes(payload)
-        if notes is None:
-            return False, None
+        notes = verified.get("notes") or []
         new_notes = [note for note in notes if note["id"] not in before]
         matches = [
             note for note in new_notes if _title_key(note["title"]) == _title_key(request.title)
@@ -611,11 +664,11 @@ class XiaohongshuPublisher(Publisher):
         if not login_ok:
             # The POST has not been attempted, so this is a definite failure,
             # not an unknown publish.
-            raise PublishFailed(login_detail, retryable=False)
+            raise PublishFailed(login_detail, retryable=False, code="login_expired")
         identity_ok, identity_detail, _user_id = self._identity_check()
         if not identity_ok:
             # Fail before POST: no content has been sent to the platform.
-            raise PublishFailed(identity_detail, retryable=False)
+            raise PublishFailed(identity_detail, retryable=False, code="account_mismatch")
         path = str(self.config.get("publisher.xiaohongshu.publish_path", "/api/v1/publish"))
         # Only outgoing image paths are translated.  The request metadata,
         # approval binding and local content hashes are left untouched.
@@ -672,12 +725,14 @@ class XiaohongshuPublisher(Publisher):
                 if confirmed is not None:
                     return confirmed
             if feed_read_ok:
-                raise PublishFailed(
+                # A readable feed with no new note does not prove that the
+                # platform rejected the request: the bridge may still be
+                # processing, or the note may appear later.  Keep it unknown.
+                raise PublishUnknown(
                     "bridge returned HTTP 500 and the authenticated account feed "
-                    "has no new matching note after 25s; platform likely rejected "
-                    "the publish (no automatic retry)",
-                    retryable=False,
-                    status=response.status,
+                    "has no new matching note after 25s; publish state remains unknown "
+                    "(no automatic retry)",
+                    code="unknown_result",
                 )
             raise PublishUnknown(
                 f"bridge returned HTTP {response.status}; publish state unknown "
@@ -688,15 +743,17 @@ class XiaohongshuPublisher(Publisher):
                 "bridge rejected the request (login/token may have expired); check the local bridge",
                 retryable=False,
                 status=response.status,
+                code="login_expired",
             )
         if response.status >= 400:
             raise PublishFailed(
                 f"bridge rejected the publish request with HTTP {response.status}",
                 retryable=False,
                 status=response.status,
+                code="rejected",
             )
         if isinstance(payload, dict) and payload.get("success") is False:
-            raise PublishFailed(f"bridge reported failure: {payload.get('message') or payload}", retryable=False)
+            raise PublishFailed(f"bridge reported failure: {payload.get('message') or payload}", retryable=False, code="rejected")
 
         post_id, url = _extract_post_receipt(payload)
         if not post_id and not url:

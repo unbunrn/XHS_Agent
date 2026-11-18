@@ -176,8 +176,20 @@ AGENT_DECISION_SYSTEM_PROMPT = """你是内容创作 agent 的决策器。每一
 8. 输出简洁，不写思维过程。"""
 
 
-DRAFT_REVIEW_SYSTEM_PROMPT = """你是发布前的独立审稿 agent，不是写稿员。只输出一个 JSON 对象。
-任务：检查 draft 是否可以在人工审批前提交。你不能因为文风普通、观点不合你口味就拒绝；只检查事实、来源、标题正文一致性、图片事实和明显逻辑问题。
+PUBLICATION_AGENT_SYSTEM_PROMPT = """你是已批准作品的发布与故障恢复 agent。每一步只选择一个已注册工具，输出一个 JSON 对象。
+你不是固定重试器：根据 task、package、attempts、最近步骤和工具结果，决定诊断、恢复或等待。
+规则：
+1. 只输出 {"action":"...","args":{...},"intent_summary":"...","expected_result":"...","evidence_refs":[...]}。
+2. 只能选择 payload.tools 中存在的工具；只有工具观察是事实，不得编造 published、连接成功或“确定未发布”。
+3. 首次提交前先检查 task、bridge health、login 和资产；资产只能从批准根目录恢复相同 hash 的字节。
+4. 不得修改批准正文/标题/图片，不得跳过审批、账号、配额、有效期或取消检查，不得自动重发 unknown。
+5. unknown 只能只读对账；连接错误可退避；登录失效只等待主人，不索取 Cookie/二维码到模型上下文。
+6. 需要主人操作时用 request_owner_action 提一个具体问题并等待；达到重试上限或无法判断时转 waiting_owner。
+7. 成功后必须给出可核实的发布 ID/URL；没有回执不是成功。
+8. 输出简洁，不写思维过程。"""
+
+
+DRAFT_REVIEW_SYSTEM_PROMPT = """你是发布前的独立审稿 agent，不是写稿员。只输出一个 JSON 对象。任务：检查 draft 是否可以在人工审批前提交。你不能因为文风普通、观点不合你口味就拒绝；只检查事实、来源、标题正文一致性、图片事实和明显逻辑问题。
 规则：
 1. 逐条检查 claims / caption / storyboard 中的事实、数字、版本、日期，是否被所引用的 evidence 原文支持；没有 evidence_id 的 fact 必须判为问题。
 2. 检查来源标签：evidence.source_role=secondary 的报道必须写成“据/媒体称/报道”，不得写成“官方宣布/官方确认”；official/vendor_primary 才可用官方口吻。
@@ -232,6 +244,8 @@ class FakeLLM:
             data = self._research_plan(payload)
         elif purpose == "source_identity":
             data = self._source_identity(payload)
+        elif purpose == "publication_decide":
+            data = {"action": "inspect_task", "args": {}, "intent_summary": "offline inspect", "expected_result": "facts"}
         else:
             raise LLMError(f"fake LLM does not implement purpose {purpose!r}")
         if "error" in data:
@@ -600,6 +614,8 @@ class DeepSeekLLM:
             system_prompt = DRAFT_REVIEW_SYSTEM_PROMPT
         elif purpose == "agent_decide":
             system_prompt = AGENT_DECISION_SYSTEM_PROMPT
+        elif purpose == "publication_decide":
+            system_prompt = PUBLICATION_AGENT_SYSTEM_PROMPT
         elif purpose == "draft":
             system_prompt = SYSTEM_PROMPT
         else:

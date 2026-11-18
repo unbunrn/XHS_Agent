@@ -93,6 +93,7 @@ DEFAULTS: dict[str, Any] = {
         "max_candidates_per_round": 3,
         "max_publish_per_day": 1,
         "max_manual_publish_per_day": 1,
+        "max_publish_attempts_per_task": 3,
         "max_manual_drafts_per_day": 1,
         "max_age_hours": 72,
         "event_window_days": 7,
@@ -133,6 +134,22 @@ DEFAULTS: dict[str, Any] = {
         "daily_discovery_max_topics": 2,
         "daily_discovery_max_age_hours": 48,
         "daily_discovery_feed_limit": 50,
+    },
+    # Publication Recovery Agent: approved artifact -> durable task -> bounded
+    # diagnosis/retry. Off by default; the old publish gate remains the final
+    # authority either way.
+    "publication_agent": {
+        "enabled": False,
+        "max_steps": 8,
+        "max_model_calls": 12,
+        "max_daily_model_calls": 100,
+        "max_invalid_decisions": 2,
+        "max_retries": 3,
+        "retry_base_seconds": 30,
+        "retry_max_seconds": 1800,
+        "login_wait_seconds": 300,
+        "owner_wait_seconds": 3600,
+        "task_ttl_seconds": 86400,
     },
     # network：抓取网页时的边界。
     # max_fetch_bytes 防止一个超大响应把内存吃光；

@@ -452,7 +452,7 @@ class StoreTests(TestCase):
 
     def test_migration_9_tables_and_run_roundtrip(self):
         row = self.env.db.fetchone("SELECT MAX(version) AS v FROM schema_migrations")
-        self.assertEqual(int(row["v"]), 10)
+        self.assertEqual(int(row["v"]), 11)
         for table in ("creator_agent_runs", "creator_agent_steps", "creator_agent_artifacts", "creator_agent_preferences", "creator_agent_materials"):
             self.assertIsNotNone(self.env.db.fetchone("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)))
         store = AgentStore(self.env.db, self.env.clock)

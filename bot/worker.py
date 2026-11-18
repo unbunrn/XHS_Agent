@@ -160,9 +160,14 @@ class Worker:
         sync_sources(self.db, self.config)
         recover_inflight(self.db)
         unknown = recover_interrupted_publishes(self.db, self.clock, self.config)
+        from .services.publication_agent.entry import recover_unknown_reconciliations
+
+        reconcile = recover_unknown_reconciliations(self.db, self.clock)
         stale = recover_stale_jobs(self.db, self.clock)
         if unknown:
             log.warning("recovered %s interrupted publish attempt(s) as publish_unknown", unknown)
+        if reconcile:
+            log.warning("queued %s missing unknown-result reconciliation job(s)", reconcile)
         if stale:
             log.warning("requeued %s stale job lease(s)", stale)
         # A fresh process must do one collection soon, regardless of when the
@@ -429,6 +434,47 @@ class Worker:
             "error": result.error[:200] if result.error else "",
         }
 
+    def _handle_publication_agent(self, job) -> dict[str, Any]:
+        from .services.publication_agent.live import LivePublicationRuntime
+        from .services.publication_agent.runner import PublicationRunner
+
+        if not bool(self.config.get("publication_agent.enabled", False)):
+            return {"skipped": "publication_agent is disabled"}
+        payload = job_payload(job)
+        task_id = payload.get("task_id")
+        if task_id is None:
+            return {"skipped": "publication job has no task_id"}
+        runtime = LivePublicationRuntime(
+            self.db, self.config, self.clock, publisher=self.publisher
+        )
+        runner = PublicationRunner(
+            self.db, self.config, self.clock, self.llm, runtime
+        )
+        try:
+            result = runner.run(
+                int(task_id),
+                diagnose_only=bool(payload.get("diagnose_only")),
+                reconcile_only=bool(payload.get("reconcile_only")),
+            )
+        except Exception as exc:  # noqa: BLE001 - a crashed agent must not look done
+            return {
+                "task_id": int(task_id),
+                "retry": True,
+                "error": f"{type(exc).__name__}: {exc}",
+                "retry_after_seconds": 60,
+            }
+        try:
+            delivered = deliver_pending(self.db, self.config, self.clock, self.notifier)
+        except NotConfigured as exc:
+            delivered = [{"ok": False, "error": str(exc)}]
+        return {
+            "task_id": result.task_id,
+            "state": result.state,
+            "steps": result.steps,
+            "error": result.error or "",
+            "notifications": delivered,
+        }
+
     def _handle_revise(self, job) -> dict[str, Any]:
         # The Feishu/CLI callback only queued this job.  The model call happens
         # here, away from the 3-second long-connection callback.
@@ -555,6 +601,7 @@ class Worker:
         return {
             "creator_discovery": self._handle_creator_discovery,
             "creator_agent_run": self._handle_creator_agent,
+            "publication_agent": self._handle_publication_agent,
             "revise": self._handle_revise,
             "publish": self._handle_publish,
         }

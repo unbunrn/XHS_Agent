@@ -309,7 +309,7 @@ class XhsIdentityTests(unittest.TestCase):
         self.assertTrue(outcome.receipt["verified_from_feed"])
         self.assertEqual(len(bridge.posts), 1)
 
-    def test_5xx_with_readable_unchanged_feed_is_failed(self) -> None:
+    def test_5xx_with_readable_unchanged_feed_is_unknown(self) -> None:
         feed = _me_payload(("old-note", "旧笔记", "old-xsec"))
         bridge = FakeBridgeHttp(
             me=feed,
@@ -318,7 +318,7 @@ class XhsIdentityTests(unittest.TestCase):
         )
         publisher = self._publisher(_config(Path.cwd() / "var"), bridge)
         with mock.patch("bot.adapters.publishers.time.sleep"):
-            with self.assertRaises(PublishFailed):
+            with self.assertRaises(PublishUnknown):
                 publisher.publish(_request())
 
     def test_5xx_with_unreadable_feed_stays_unknown(self) -> None:

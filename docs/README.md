@@ -1,5 +1,12 @@
 # 文档入口
 
+- [发布恢复 Agent 独立审查（2026-11-18）](delivery/PUBLICATION_AGENT_INDEPENDENT_REVIEW_20261118.md)：原始 46 项回归通过，但独立探针复现暂停仍发帖、未知取消过早终结及恢复预算阻塞；审查结论仍是不通过部署验收。
+
+## 最新开发任务
+
+- [发布恢复 Agent：Round-2 返修与离线故障恢复演示（2026-11-18）](delivery/PUBLICATION_AGENT_ROUND2_DELIVERY.md)：先复现“列表属于谁”和“检查原因改变发布决定”两个反例，再修身份/列表同源核验、诊断只读、预发送基线、unknown 不重置；离线演示覆盖资产缺失→同字节恢复→一次 POST→通知重启→重复事件不重发，以及跨账号同标题不认领、超时 unknown→同事务自动入队→队列退避→重启 worker 认领原 attempt；主人不发消息也能恢复。定向 **77/77**（517.425s）、主全量 **354/354**（943.785s，`var/tests/full_suite_round2_startup_attempt_source.log`）通过；migration 11 仅临时副本演练，**live 未启用、未迁移、未真实发布**。回滚副本演练与 [回滚说明](delivery/PUBLICATION_AGENT_ROLLBACK.md) 已更新。
+- [发布与故障恢复 Agent：R1–R6 返修交付报告（2026-11-18）](delivery/PUBLICATION_AGENT_DELIVERY.md)：R1–R6 返修和 handoff 反例；定向 **71/71**、主全量 **333/333** 通过（799.335s）。migration 11 仅在临时副本演练，**live 未启用、未迁移、未真实发布**。补充报告：[handoff 反例返修](delivery/PUBLICATION_AGENT_HANDOFF_DELIVERY.md)。另见[架构](PUBLICATION_AGENT_ARCHITECTURE.md)、[使用](PUBLICATION_AGENT_USAGE.md)、[进度](delivery/PUBLICATION_AGENT_PROGRESS.md)。原始任务书：[DSH 开发任务](DSH_PUBLICATION_RECOVERY_AGENT_TASK.md)。
+
 最新独立检查：[Creator Agent V2 状态与改进优先级](delivery/CREATOR_AGENT_V2_INDEPENDENT_REVIEW_20261113.md)（2026-11-13，20 项离线测试通过，但修改路由、重复审批及事实检查反例已复现；不能视为完整交付）。
 
 **当前新开发任务**：[创作智能体 V2：DSH 改造任务书](DSH_CREATOR_AGENT_V2_TASK.md)（2026-11-12）。核心交付：[统一交付报告](delivery/CREATOR_AGENT_V2_DELIVERY.md)、[架构](CREATOR_AGENT_V2_ARCHITECTURE.md)、[使用](CREATOR_AGENT_V2_USAGE.md)。V2 已部署到主项目并接入 live worker/Feishu/真实审批；2026-11-13 一条 V2 生成、owner 批准的笔记已真实发布并确认回执。V2 代码只保留在主项目；原隔离副本已清理。
@@ -58,16 +65,3 @@
 *_TASK.md、*_REVIEW.md、IMPLEMENTATION_STATUS.md及日期验收文件是历史资料，不可默认当作最新需求。实际配置与明确的新用户指令优先；发现矛盾时查代码和证据，不自行编造完成情况。
 
 后续每阶段真实交付报告放docs/delivery/，并在这里新增链接。不要移动、删除历史文档或预先创建虚构交付报告。
-
-
-
-
-
-
-
-
-
-
-
-
-

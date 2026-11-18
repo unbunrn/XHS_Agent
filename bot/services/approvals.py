@@ -456,6 +456,38 @@ def handle_inbound_message(
     require_p2p = bool(config.get("notify.lark.require_p2p", True))
     is_p2p = (chat_type or "").lower() in {"p2p", "private"}
 
+    pub_text = (text or "").strip()
+    if bool(config.get("publication_agent.enabled", False)) and re.match(
+        r"^(发布状态|检查原因|修复并重试|已登录|取消发布|拒绝发布|暂停发布|继续发布|确认未发布并重试)\s*XH-",
+        pub_text,
+        re.IGNORECASE,
+    ):
+        if not is_p2p:
+            return _record_rejected(
+                db, now, message_id, channel, sender_id, chat_id, chat_type, text,
+                "rejected_chat_type", "publication commands are only accepted in a p2p chat",
+            )
+        from .publication_agent.entry import handle_command
+
+        with db.tx() as conn:
+            conn.execute(
+                "INSERT INTO inbound_messages(message_id, channel, sender_id, chat_id, chat_type, text, "
+                "received_at, outcome, detail) VALUES (?, ?, ?, ?, ?, ?, ?, 'processing', NULL)",
+                (message_id, channel, sender_id, chat_id, chat_type, text[:4000], now),
+            )
+        result = handle_command(db, config, clock, pub_text, event_key=message_id)
+        outcome = str(result.get("outcome") or "publication_command")
+        _finish_message(
+            db, now, message_id, outcome, str(result.get("detail") or result.get("state") or ""),
+            extra={"publication": result},
+        )
+        return {
+            "ok": bool(result.get("ok")),
+            "outcome": outcome,
+            "message_id": message_id,
+            "detail": result,
+        }
+
     # Creator Agent V2 is the default new-topic path when enabled.  The
     # legacy ``选题``/``写一篇`` creation path is intentionally not reachable
     # any more in that mode; it would otherwise keep two divergent pipelines
@@ -726,6 +758,27 @@ def handle_inbound_message(
         # 每个审批最多排一个发布任务；发布闸门里还有唯一键兜底，
         # 即使这里重复调用也不会产生两次发布。
         from ..jobs import enqueue_job
+
+        if bool(config.get("publication_agent.enabled", False)):
+            from .publication_agent.entry import create_task_for_approval
+
+            try:
+                task_result = create_task_for_approval(
+                    db, config, clock, int(approval["id"])
+                )
+            except Exception as exc:  # noqa: BLE001 - approval stays approved; owner sees error
+                return finish(
+                    "approved",
+                    f"approved {code}; publication task creation failed: {type(exc).__name__}: {exc}",
+                    extra={"code": code},
+                    notify_owner=True,
+                )
+            return finish(
+                "approved",
+                f"approved {code}; publication task {task_result['task']['code']} queued",
+                extra={"code": code, "task": task_result["task"]},
+                notify_owner=True,
+            )
 
         enqueue_job(
             db,
