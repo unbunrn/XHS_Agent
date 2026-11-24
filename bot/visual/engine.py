@@ -166,6 +166,7 @@ def _open_page(
     aborted_counter: list[str] | None = None,
 ):
     import os
+    import shutil
     from playwright.sync_api import sync_playwright
 
     # Point TEMP/TMP to project-local var/tmp so Playwright's Node driver and
@@ -179,9 +180,10 @@ def _open_page(
         os.environ["TMPDIR"] = str(local_tmp)
     except OSError:
         pass
-    node_exe = Path(r"D:\Dev\Tools\node-v22.23.2-win-x64\node.exe")
-    if "PLAYWRIGHT_NODEJS_PATH" not in os.environ and node_exe.is_file():
-        os.environ["PLAYWRIGHT_NODEJS_PATH"] = str(node_exe)
+    if "PLAYWRIGHT_NODEJS_PATH" not in os.environ:
+        found_node = shutil.which("node")
+        if found_node:
+            os.environ["PLAYWRIGHT_NODEJS_PATH"] = found_node
 
     pw = None
     browser = None

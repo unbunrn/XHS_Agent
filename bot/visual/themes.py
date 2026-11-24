@@ -94,8 +94,8 @@ THEMES: dict[str, Theme] = {
             ),
         ),
         fonts={
-            "display": ("NotoSerifSC-VF.ttf", "NotoSansSC-VF.ttf"),
-            "body": ("NotoSansSC-VF.ttf", "AlibabaPuHuiTi_2_55_Regular.ttf"),
+            "display": ("NotoSerifSC-VF.ttf", "NotoSansSC-VF.ttf", "simsun.ttc", "msyhbd.ttc", "msyh.ttc"),
+            "body": ("NotoSansSC-VF.ttf", "AlibabaPuHuiTi_2_55_Regular.ttf", "msyh.ttc", "Deng.ttf"),
         },
     ),
     "swiss": Theme(
@@ -140,8 +140,8 @@ THEMES: dict[str, Theme] = {
             ),
         ),
         fonts={
-            "display": ("AlibabaPuHuiTi_2_65_Medium.ttf", "NotoSansSC-VF.ttf"),
-            "body": ("AlibabaPuHuiTi_2_55_Regular.ttf", "NotoSansSC-VF.ttf"),
+            "display": ("AlibabaPuHuiTi_2_65_Medium.ttf", "NotoSansSC-VF.ttf", "msyhbd.ttc", "simhei.ttf"),
+            "body": ("AlibabaPuHuiTi_2_55_Regular.ttf", "NotoSansSC-VF.ttf", "msyh.ttc", "Deng.ttf"),
         },
         folio_style="swiss",
     ),
@@ -187,9 +187,9 @@ THEMES: dict[str, Theme] = {
             ),
         ),
         fonts={
-            "display": ("AlibabaPuHuiTi_2_65_Medium.ttf", "NotoSansSC-VF.ttf"),
-            "body": ("NotoSansSC-VF.ttf", "AlibabaPuHuiTi_2_55_Regular.ttf"),
-            "mono": ("JetBrainsMono-Regular.ttf", "consola.ttf", "NotoSansSC-VF.ttf"),
+            "display": ("AlibabaPuHuiTi_2_65_Medium.ttf", "NotoSansSC-VF.ttf", "msyhbd.ttc", "simhei.ttf"),
+            "body": ("NotoSansSC-VF.ttf", "AlibabaPuHuiTi_2_55_Regular.ttf", "msyh.ttc", "Deng.ttf"),
+            "mono": ("JetBrainsMono-Regular.ttf", "consola.ttf", "NotoSansSC-VF.ttf", "msyh.ttc"),
         },
     ),
     "newsprint": Theme(
@@ -234,8 +234,8 @@ THEMES: dict[str, Theme] = {
             ),
         ),
         fonts={
-            "display": ("NotoSerifSC-VF.ttf", "NotoSansSC-VF.ttf"),
-            "body": ("NotoSansSC-VF.ttf", "NotoSerifSC-VF.ttf"),
+            "display": ("NotoSerifSC-VF.ttf", "NotoSansSC-VF.ttf", "simsun.ttc", "msyhbd.ttc"),
+            "body": ("NotoSansSC-VF.ttf", "NotoSerifSC-VF.ttf", "msyh.ttc", "Deng.ttf"),
         },
     ),
     "notebook": Theme(
@@ -280,8 +280,8 @@ THEMES: dict[str, Theme] = {
             ),
         ),
         fonts={
-            "display": ("LXGWWenKai-Regular.ttf", "NotoSerifSC-VF.ttf", "NotoSansSC-VF.ttf"),
-            "body": ("LXGWWenKai-Regular.ttf", "NotoSansSC-VF.ttf"),
+            "display": ("LXGWWenKai-Regular.ttf", "NotoSerifSC-VF.ttf", "NotoSansSC-VF.ttf", "simkai.ttf", "msyh.ttc"),
+            "body": ("LXGWWenKai-Regular.ttf", "NotoSansSC-VF.ttf", "msyh.ttc", "Deng.ttf"),
         },
     ),
     "poster": Theme(
@@ -337,8 +337,8 @@ THEMES: dict[str, Theme] = {
             ),
         ),
         fonts={
-            "display": ("AlibabaPuHuiTi_2_65_Medium.ttf", "NotoSansSC-VF.ttf"),
-            "body": ("NotoSansSC-VF.ttf", "AlibabaPuHuiTi_2_55_Regular.ttf"),
+            "display": ("AlibabaPuHuiTi_2_65_Medium.ttf", "NotoSansSC-VF.ttf", "msyhbd.ttc", "simhei.ttf"),
+            "body": ("NotoSansSC-VF.ttf", "AlibabaPuHuiTi_2_55_Regular.ttf", "msyh.ttc", "Deng.ttf"),
         },
         folio_style="minimal",
     ),

@@ -148,9 +148,10 @@ def main(argv: list[str] | None = None) -> int:
     env["TEMP"] = str(local_tmp)
     env["TMP"] = str(local_tmp)
     env["TMPDIR"] = str(local_tmp)
-    node_exe = Path(r"D:\Dev\Tools\node-v22.23.2-win-x64\node.exe")
-    if "PLAYWRIGHT_NODEJS_PATH" not in env and node_exe.is_file():
-        env["PLAYWRIGHT_NODEJS_PATH"] = str(node_exe)
+    if "PLAYWRIGHT_NODEJS_PATH" not in env:
+        found_node = shutil.which("node")
+        if found_node:
+            env["PLAYWRIGHT_NODEJS_PATH"] = found_node
 
     # Prefer an absolute executable path in the identity record.  This is what
     # stop.ps1 compares against the live process image before killing anything.
