@@ -171,8 +171,16 @@ class PublicationTools:
         req = ctx.store.add_owner_request(ctx.task.id, question=question, kind=kind)
         waiting_state = "waiting_login" if kind.lower() in {"login", "reauth", "qr"} else "waiting_owner"
         ctx.store.update(ctx.task.id, state=waiting_state, wait_reason=question)
-        self.runtime.notify(ctx.task, question)
-        return {"ok": True, "observation": {"owner_request_id": req, "state": waiting_state}, "terminal": True}
+        obs: dict[str, Any] = {"owner_request_id": req, "state": waiting_state}
+        qr_notifier = getattr(self.runtime, "notify_login_qrcode", None)
+        if waiting_state == "waiting_login" and callable(qr_notifier):
+            qr_obs = qr_notifier(ctx.task, question)
+            if isinstance(qr_obs, dict):
+                obs["qr_sent"] = bool(qr_obs.get("qr_sent", False))
+                obs["already_logged_in"] = bool(qr_obs.get("already_logged_in", False))
+        else:
+            self.runtime.notify(ctx.task, question)
+        return {"ok": True, "observation": obs, "terminal": True}
 
     def _schedule_resume(self, ctx: PublicationContext, args: dict[str, Any]) -> dict[str, Any]:
         delay = max(10, min(3600, int(args["delay_seconds"])))

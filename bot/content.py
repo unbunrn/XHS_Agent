@@ -410,10 +410,6 @@ class DraftContent:
                 return item
         return None
 
-    def factual_claims(self) -> list[Claim]:
-        # 只挑“需要证据”的主张；analysis（分析）不需要。
-        return [c for c in self.claims if c.kind in {"fact", "vendor_claim"}]
-
     def as_dict(self) -> dict:
         # 完整快照，用于存库和算正文哈希。
         return {

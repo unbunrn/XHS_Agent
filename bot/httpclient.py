@@ -33,6 +33,7 @@ from __future__ import annotations
 import email.utils
 import json
 import random
+import re
 import socket
 import time
 import urllib.error
@@ -343,3 +344,22 @@ def _parse_retry_after(value: str) -> float | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return max(0.0, (parsed - datetime.now(timezone.utc)).total_seconds())
+
+
+_BEARER_RE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
+_KEY_RE = re.compile(r"\bsk-[A-Za-z0-9._-]{8,}\b")
+
+
+def safe_http_error_text(exc: urllib.error.HTTPError, *, secret: str | None = None) -> str:
+    """Read, redact secrets from, and truncate an HTTPError response body."""
+    # Provider error bodies are untrusted and may echo request headers.  Redact
+    # the exact key, common bearer/sk- patterns, then truncate to 300 chars.
+    try:
+        raw = exc.read(1000).decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 - best-effort error detail only
+        return ""
+    if secret:
+        raw = raw.replace(secret, "[redacted]")
+    raw = _BEARER_RE.sub("Bearer [redacted]", raw)
+    raw = _KEY_RE.sub("[redacted]", raw)
+    return re.sub(r"\s+", " ", raw).strip()[:300]

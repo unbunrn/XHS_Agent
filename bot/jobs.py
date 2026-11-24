@@ -228,30 +228,6 @@ def job_payload(row: sqlite3.Row) -> dict:
     return json_loads(row["payload_json"], {}) or {}
 
 
-def due_job_count(db: Database, clock: Clock) -> int:
-    # “现在有多少任务到期了”——控制台用它显示待办数量。
-    return int(
-        db.scalar(
-            "SELECT COUNT(*) FROM jobs WHERE state='pending' AND next_run_at <= ?",
-            (to_iso(clock.now()),),
-            0,
-        )
-    )
-
-
-def job_summary(db: Database) -> list[dict[str, Any]]:
-    # 按“类型 + 状态”分组统计，控制台用它画一张总览表。
-    rows = db.fetchall(
-        "SELECT kind, state, COUNT(*) AS n, MAX(updated_at) AS last_at FROM jobs GROUP BY kind, state "
-        "ORDER BY kind, state"
-    )
-    return [dict(row) for row in rows]
-
-
-def job_by_id(db: Database, job_id: int) -> sqlite3.Row | None:
-    return db.fetchone("SELECT * FROM jobs WHERE id=?", (job_id,))
-
-
 def run_due_jobs(
     db: Database,
     clock: Clock,
@@ -297,8 +273,3 @@ def run_due_jobs(
             complete_job(db, int(job["id"]), clock, outcome)
             results.append({"job_id": job["id"], "kind": kind, "state": "done", **outcome})
     return results
-
-
-def parse_job_time(value: str | None) -> datetime | None:
-    # 把数据库里的 ISO 时间字符串解析回 datetime，坏数据返回 None。
-    return parse_iso(value)

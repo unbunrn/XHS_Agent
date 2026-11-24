@@ -41,16 +41,6 @@ class RecentPost:
 
 
 @dataclass(frozen=True)
-class StyleIssue:
-    code: str
-    snippet: str
-    hint: str
-
-    def as_dict(self) -> dict[str, str]:
-        return {"code": self.code, "snippet": self.snippet, "hint": self.hint}
-
-
-@dataclass(frozen=True)
 class StyleReport:
     score: int
     issues: list[dict[str, str]] = field(default_factory=list)

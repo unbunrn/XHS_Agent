@@ -260,3 +260,39 @@ def restore_same_bytes(
                 restored.append(int(image.get("ordinal")))
                 break
     return {"restored": restored}
+
+
+def latest_attempt(db: Any, task_id: int) -> dict[str, Any] | None:
+    """Return the most recent publish_attempts row for a publication task."""
+    row = db.fetchone(
+        "SELECT * FROM publish_attempts WHERE publication_task_id=? ORDER BY id DESC LIMIT 1",
+        (int(task_id),),
+    )
+    return dict(row) if row is not None else None
+
+
+def format_attempt_status(
+    attempt: dict[str, Any] | None, *, include_attempt_id: bool = False
+) -> str:
+    """Translate a publish_attempt row into an owner-facing Chinese status line."""
+    if attempt is None:
+        return "提交情况：尚未提交到小红书（没有发送记录）。"
+    state = str(attempt.get("state") or "")
+    if state in {"unknown", "publishing"}:
+        if include_attempt_id:
+            return (
+                f"提交情况：上次发送结果未确认，可能已经提交（记录 #{int(attempt['id'])}）；"
+                "请先核对平台，不要直接重发。"
+            )
+        return "提交情况：上次发送结果未确认，可能已经提交；请先只读核对，不要直接重发。"
+    if state == "published":
+        return "提交情况：平台已有发布记录。" if include_attempt_id else "提交情况：平台已确认发布。"
+    if state == "simulated":
+        return (
+            "提交情况：测试环境模拟发布，没有真实上架。"
+            if include_attempt_id
+            else "提交情况：只在测试环境模拟发布，没有真实上架。"
+        )
+    if state == "failed" and str(attempt.get("dispatch_state") or "") == "not_dispatched":
+        return "提交情况：最近一次发送没有真正发出，尚未发布。"
+    return "提交情况：最近一次发送未成功，尚未确认发布。"

@@ -415,10 +415,3 @@ class BudgetGuard:
         with self.db.tx() as conn:
             set_setting(conn, "generation_paused_on", day)
             set_setting(conn, "generation_pause_reason", reason[:300])
-
-    def resume_generation(self, reason: str = "manual resume") -> None:
-        # 人工解除暂停（控制台按钮或 CLI 命令）。
-        # 把日期清空，今天就会重新允许生成；reason 仅用于审计展示。
-        with self.db.tx() as conn:
-            set_setting(conn, "generation_paused_on", "")
-            set_setting(conn, "generation_pause_reason", reason)

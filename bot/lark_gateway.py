@@ -229,13 +229,6 @@ class LarkLongConnection:
             raise NotConfigured(f"failed to start Feishu long connection: {exc}") from exc
 
 
-def build_gateway(
-    config: Config, db: Database, clock: Clock | None = None, llm: Any | None = None
-) -> LarkLongConnection:
-    # 工厂函数：方便测试/脚本替换依赖，也保持调用方不需要知道构造细节。
-    return LarkLongConnection(config, db, clock=clock, llm=llm)
-
-
 def main(config: Config, db: Database, clock: Clock | None = None, llm: Any | None = None) -> int:
     # 先打印健康信息（能不能启动），再真正启动并阻塞。
     gateway = LarkLongConnection(config, db, clock=clock, llm=llm)

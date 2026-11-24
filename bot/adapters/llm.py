@@ -39,6 +39,8 @@ from typing import Any
 
 from ..budget import BudgetGuard
 from ..config import Config
+from ..httpclient import safe_http_error_text
+from ..httpclient import safe_http_error_text as _safe_error_text
 from ..timeutil import Clock
 from .types import LLMError, LLMOutputError, LLMResponse, NotConfigured, TokenUsage
 
@@ -815,7 +817,7 @@ class DeepSeekLLM:
                     raise LLMError(f"DeepSeek response exceeds {limit} bytes")
                 status = resp.status
         except urllib.error.HTTPError as exc:
-            detail = _safe_error_text(exc, secret=key)
+            detail = safe_http_error_text(exc, secret=key)
             if 300 <= exc.code < 400:
                 # Do not retry or forward the bearer token to the redirect target.
                 raise _FatalHTTP(f"DeepSeek HTTP {exc.code}: redirect refused") from exc
@@ -1000,25 +1002,6 @@ def _model_refusal_reason(data: dict, *, secret: str | None = None) -> str | Non
     if not text:
         text = "model declined to generate a draft"
     return text[:300]
-
-
-_BEARER_RE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
-_KEY_RE = re.compile(r"\bsk-[A-Za-z0-9._-]{8,}\b")
-
-
-def _safe_error_text(exc: urllib.error.HTTPError, *, secret: str | None = None) -> str:
-    # Provider error bodies are untrusted and may echo request headers.  Redact
-    # the exact key, common bearer/sk- patterns, then truncate to 300 chars.
-    try:
-        raw = exc.read(1000).decode("utf-8", "replace")
-    except Exception:  # noqa: BLE001 - best-effort error detail only
-        return ""
-    if secret:
-        raw = raw.replace(secret, "[redacted]")
-    raw = _BEARER_RE.sub("Bearer [redacted]", raw)
-    raw = _KEY_RE.sub("[redacted]", raw)
-    raw = re.sub(r"\s+", " ", raw).strip()
-    return raw[:300]
 
 
 def _editorial_mode(text: str) -> str:

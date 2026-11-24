@@ -1040,8 +1040,3 @@ def draft_view(db: Database, draft_id: int) -> dict[str, Any] | None:
     view["approval"] = dict(approval) if approval is not None else None
     return view
 
-
-def list_drafts(db: Database, limit: int = 20) -> list[sqlite3.Row]:
-    # 按创建顺序倒序列出最近的草稿，供控制台列表页使用。
-    return db.fetchall("SELECT * FROM drafts ORDER BY id DESC LIMIT ?", (int(limit),))
-

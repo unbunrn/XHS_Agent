@@ -189,14 +189,6 @@ def _revision_candidates(
     return out
 
 
-def _revision_target(
-    db: Database, account_id: str, approval_code: str | None = None
-) -> dict[str, Any] | None:
-    """Backward-friendly single-target helper (latest eligible work)."""
-    rows = _revision_candidates(db, account_id, approval_code)
-    return rows[0] if rows else None
-
-
 def _revision_job_active(db: Database, target: dict[str, Any]) -> bool:
     """True when this exact artifact version already has a queued/running revision.
 

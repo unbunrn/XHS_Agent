@@ -58,19 +58,3 @@ def approval_code() -> str:
     # 审批码虽然不算密码，但也不该让人轻易枚举。
     body = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(6))
     return f"XH-{body}"
-
-
-def topic_request_code() -> str:
-    """A phone-friendly topic request code such as ``XT-7K2M9Q``."""
-    body = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(6))
-    return f"XT-{body}"
-
-
-def item_key(*parts: str) -> str:
-    """Deterministic key for source/event dedupe (not a secret)."""
-    # 把多段文本用不可见的分隔符 \x1f 拼起来再算 SHA-256。
-    # “确定性”意思是：同样的输入永远得到同样的结果，所以适合做去重键。
-    # 用 \x1f 是为了避免 ("ab","c") 和 ("a","bc") 拼出同一个字符串。
-    import hashlib
-
-    return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()

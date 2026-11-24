@@ -194,21 +194,10 @@ class Database:
         return destination
 
 
-def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
-    # sqlite3.Row 不是真正的 dict，需要显式转换后才能 json.dumps。
-    return dict(row) if row is not None else None
-
-
 def get_setting(conn: sqlite3.Connection, key: str, default: str | None = None) -> str | None:
     # settings 表是简单的键值对，用来存“下次采集时间”“预算暂停”等运行状态。
     row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
     return default if row is None else str(row["value"])
-
-
-def get_bool_setting(conn: sqlite3.Connection, key: str, default: bool = False) -> bool:
-    # 数据库里布尔值统一存成文本；这里把常见写法都认成 True。
-    value = get_setting(conn, key, "1" if default else "0")
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def set_setting(conn: sqlite3.Connection, key: str, value: str, at: str | None = None) -> None:

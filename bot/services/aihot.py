@@ -57,14 +57,6 @@ class _DescriptionParser(HTMLParser):
             self.text.append(data.strip())
 
 
-def is_aihot_url(url: str | None) -> bool:
-    try:
-        host = (urlsplit(str(url or "")).hostname or "").lower().rstrip(".")
-    except ValueError:
-        return False
-    return host in AIHOT_HOSTS and "/items/" in str(url or "")
-
-
 def _clean_summary(description: str, item_url: str) -> str:
     text = strip_html(description)
     lines = []
@@ -168,52 +160,3 @@ def fetch_items(http, config, *, limit: int = 50, feed_url: str | None = None) -
     if response.status >= 400:
         raise SourceError(f"AIHot feed HTTP {response.status}", retryable=response.status >= 500, status=response.status)
     return parse_items(response.body, base_url=response.url)[: max(1, min(100, int(limit)))]
-
-
-def resolve_item(http, config, item_url: str, *, limit: int = 100) -> AIHotItem | None:
-    """Resolve an ``aihot.news/items/...`` URL against the feed."""
-    if not is_aihot_url(item_url):
-        return None
-    target = canonicalize_url(item_url)
-    for item in fetch_items(http, config, limit=limit):
-        if canonicalize_url(item.item_url) == target:
-            return item
-    return None
-
-
-def best_match(items: list[AIHotItem], keywords: tuple[str, ...]) -> AIHotItem | None:
-    """Conservative lexical match for automatic discovery.
-
-    Requires at least two distinct keyword hits (or one long CJK phrase) in the
-    title/summary.  A weak match falls back to normal search instead of
-    hijacking the topic.
-    """
-    wanted = [normalize_ws(k).lower() for k in keywords if normalize_ws(k)]
-    if not wanted:
-        return None
-    best: tuple[int, AIHotItem] | None = None
-    for item in items:
-        haystack = f"{item.title}\n{item.summary}".lower()
-        hits = {k for k in wanted if k in haystack}
-        if not hits:
-            continue
-        long_hit = any(len(k) >= 4 and not k.isascii() and k in haystack for k in hits)
-        if len(hits) < 2 and not long_hit:
-            continue
-        score = len(hits) * 10 + sum(len(k) for k in hits)
-        if best is None or score > best[0]:
-            best = (score, item)
-    return best[1] if best else None
-
-
-def summary_entry(item: AIHotItem) -> SourceEntry:
-    """Build a clearly labelled aggregator entry when no original exists."""
-    body = f"{AIHOT_SUMMARY_PREFIX}{item.summary}".strip()
-    return SourceEntry(
-        title=item.title,
-        url=item.item_url,
-        summary=item.summary,
-        content=body,
-        author=item.author,
-        published_raw=item.published_raw,
-    )

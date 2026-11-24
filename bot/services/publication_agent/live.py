@@ -383,7 +383,14 @@ class LivePublicationRuntime:
             "reconcile": "platform_feed",
         }
 
-    def notify(self, task, text: str) -> int:
+    def notify(
+        self,
+        task,
+        text: str,
+        *,
+        image_paths: list[str] | None = None,
+        cleanup_images: bool = False,
+    ) -> int:
         text = str(text or "").strip()
         if not text:
             return 0
@@ -399,7 +406,62 @@ class LivePublicationRuntime:
             self.clock,
             text,
             dedupe_key=f"publication:{task.id}:batch:{batch}:{_digest(text)}",
+            image_paths=image_paths,
+            cleanup_images=cleanup_images,
         )
+
+    def notify_login_qrcode(self, task, question: str) -> dict[str, Any]:
+        """Deterministically fetch a fresh login QR image from the local bridge
+        and send it to the bound owner p2p chat without exposing image bytes or
+        credentials to the model context.
+        """
+        approval = self.db.fetchone(
+            "SELECT code FROM approvals WHERE id=?", (int(task.approval_id),)
+        )
+        code = str(approval["code"]) if approval is not None and approval["code"] else str(task.code)
+        fetcher = getattr(self.publisher, "fetch_login_qrcode", None)
+        qr_result: dict[str, Any] = {"ok": False, "already_logged_in": False, "detail": "当前发布器不支持获取二维码"}
+        if callable(fetcher):
+            try:
+                qr_result = fetcher()
+            except Exception as exc:  # noqa: BLE001
+                qr_result = {"ok": False, "already_logged_in": False, "detail": f"{type(exc).__name__}: {exc}"}
+
+        base_text = str(question or "").strip() or f"发布任务 {code} 检测到小红书登录失效，需要重新扫码登录。"
+        if qr_result.get("ok") and qr_result.get("image_path"):
+            timeout = str(qr_result.get("timeout") or "").strip()
+            timeout_hint = f"（有效期约 {timeout}）" if timeout else ""
+            full_text = (
+                f"{base_text}\n\n"
+                f"已为你获取最新小红书登录二维码{timeout_hint}，请用小红书 App 扫码确认。\n"
+                f"• 二维码若过期，直接回复：刷新二维码\n"
+                f"• 扫码完成后，请回复：已登录 {code}"
+            )
+            self.notify(
+                task,
+                full_text,
+                image_paths=[str(qr_result["image_path"])],
+                cleanup_images=True,
+            )
+            return {"qr_sent": True, "already_logged_in": False}
+
+        if qr_result.get("ok") and qr_result.get("already_logged_in"):
+            full_text = (
+                f"{base_text}\n\n"
+                f"桥接器当前提示小红书已处于登录状态。请回复：已登录 {code} 重新核验账号并继续发布；"
+                "如需重新扫码，也可回复：刷新二维码。"
+            )
+            self.notify(task, full_text)
+            return {"qr_sent": False, "already_logged_in": True}
+
+        detail = str(qr_result.get("detail") or "未知错误")
+        full_text = (
+            f"{base_text}\n\n"
+            f"自动拉取登录二维码未成功（{detail}）。\n"
+            f"请稍后回复：刷新二维码 重新获取；完成登录后回复：已登录 {code}"
+        )
+        self.notify(task, full_text)
+        return {"qr_sent": False, "already_logged_in": False}
 
     def schedule(
         self, task_id: int, wake: datetime | str, *,

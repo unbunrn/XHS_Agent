@@ -163,29 +163,6 @@ def source_row(db: Database, name: str) -> sqlite3.Row | None:
     return db.fetchone("SELECT * FROM sources WHERE name = ?", (name,))
 
 
-def is_commissioned_topic_source(source: sqlite3.Row) -> bool:
-    """True for the per-request DeepSeek Search rows created by a topic.
-
-    Those rows carry a search query only for the lifetime of one topic job.
-    They are intentionally preserved by ``sync_sources`` (including an explicit
-    owner disable), but they must never take part in the recurring 30-minute
-    collection round: their stored row has no query, so building the adapter
-    would raise ``NotConfigured`` and abort every later source in the round.
-    """
-    if str(source["kind"]).lower() not in {"deepseek_search", "deepseek-search"}:
-        return False
-    return str(source["url"]).startswith("deepseek-search://topic/")
-
-
-def recurring_sources(db: Database) -> list[sqlite3.Row]:
-    """Enabled sources that belong in the recurring collector.
-
-    Commissioned topic sources are excluded; topic jobs fetch them explicitly.
-    """
-    rows = db.fetchall("SELECT * FROM sources WHERE enabled=1 ORDER BY id")
-    return [row for row in rows if not is_commissioned_topic_source(row)]
-
-
 def adapter_for(
     db: Database,
     config: Config,
@@ -1476,11 +1453,6 @@ def build_writer_payload(
             "headings, and do not repeat caption paragraphs on image cards."
         )
     return payload
-
-
-def clock_now(db: Database) -> datetime:
-    # 简单的当前本地时间（带时区），供少数同步调用场景使用。
-    return datetime.now().astimezone()
 
 
 def _mark_source_failure(db: Database, source: sqlite3.Row, exc: Exception, clock: Clock) -> None:

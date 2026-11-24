@@ -42,8 +42,3 @@ def plan_for_error(error: TaskError, *, now: datetime, retry_count: int, max_ret
         return RecoveryPlan(False, "retry limit reached", requires_owner=True)
     delay = (30, 120, 600)[min(retry_count, 2)]
     return RecoveryPlan(True, f"retry after {delay}s", next_wake_at=(now + timedelta(seconds=delay)).isoformat())
-
-
-def approval_still_valid(approval: Any, now: datetime) -> bool:
-    exp = parse_iso(approval["expires_at"])
-    return exp is None or exp > now

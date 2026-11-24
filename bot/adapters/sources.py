@@ -39,7 +39,7 @@ from urllib.parse import urljoin, urlsplit
 
 from ..budget import BudgetGuard
 from ..config import Config
-from ..httpclient import FetchTooLarge, HttpClient, HttpTransportError
+from ..httpclient import FetchTooLarge, HttpClient, HttpTransportError, safe_http_error_text
 from ..security import SSRFBlocked, SSRFGuard, canonicalize_url, normalize_ws, strip_html, truncate
 from ..timeutil import Clock, parse_feed_datetime, to_iso
 from .types import BudgetExceeded, NotConfigured, SourceEntry, SourceError, SourceFetch
@@ -350,11 +350,6 @@ class DeepSeekSearchSource(SourceAdapter):
         self.max_retries = max(0, min(2, int(config.get("network.max_retries", 2))))
         self._sleep = sleep
         self.guard = http.guard if http is not None else SSRFGuard()
-
-    @property
-    def fetch_attempts(self) -> int:
-        """Backwards-compatible view of the shared physical-attempt counter."""
-        return int(self.fetch_quota.attempts)
 
     def fetch(self, *, etag: str | None = None, last_modified: str | None = None) -> SourceFetch:
         results = self._search()
@@ -714,7 +709,7 @@ class DeepSeekSearchSource(SourceAdapter):
                     raise SourceError("DeepSeek tool response exceeds size limit", retryable=False)
                 status = int(response.status)
         except urllib.error.HTTPError as exc:
-            detail = _safe_api_error_text(exc, secret=self.api_key)
+            detail = safe_http_error_text(exc, secret=self.api_key)
             if 300 <= exc.code < 400:
                 raise SourceError(
                     "DeepSeek API redirect refused", retryable=False, code="http_redirect"
@@ -863,22 +858,6 @@ def host_matches_allowed_domains(host: str, domains: tuple[str, ...] | list[str]
 _domain_allowlist = domain_allowlist
 
 
-_BEARER_RE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
-_KEY_RE = re.compile(r"\bsk-[A-Za-z0-9._-]{8,}\b")
-
-
-def _safe_api_error_text(exc: urllib.error.HTTPError, *, secret: str | None = None) -> str:
-    try:
-        raw = exc.read(1000).decode("utf-8", "replace")
-    except Exception:  # noqa: BLE001 - best-effort error detail only
-        return ""
-    if secret:
-        raw = raw.replace(secret, "[redacted]")
-    raw = _BEARER_RE.sub("Bearer [redacted]", raw)
-    raw = _KEY_RE.sub("[redacted]", raw)
-    return re.sub(r"\s+", " ", raw).strip()[:300]
-
-
 def _text(parent: ET.Element, tag: str) -> str:
     # 取子标签的文本。RSS 里同名标签可能有多个，find 只取第一个。
     # 如果标签没有直接文本，就把所有后代文本拼起来（Atom 常见）。
@@ -889,8 +868,3 @@ def _text(parent: ET.Element, tag: str) -> str:
         return found.text
     # Atom <content type="html"> sometimes nests text.
     return "".join(found.itertext())
-
-
-def parse_entry_datetime(entry: SourceEntry):
-    # 把适配器保留的原始时间字符串交给统一解析器。
-    return parse_feed_datetime(entry.published_raw)

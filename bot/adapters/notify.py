@@ -64,10 +64,10 @@ class Notifier:
     def send_approval(self, message: dict[str, Any]) -> NotificationResult:  # pragma: no cover
         raise NotImplementedError
 
-    def send_text(self, text: str) -> NotificationResult:
+    def send_text(self, text: str, *, image_paths: list[str] | None = None) -> NotificationResult:
         # Compatibility fallback for simple test doubles.  Production notifiers
         # override this with a text-only send to the bound owner.
-        return self.send_approval({"text": text, "image_paths": [], "code": "outcome"})
+        return self.send_approval({"text": text, "image_paths": list(image_paths or []), "code": "outcome"})
 
     def health(self) -> dict[str, Any]:  # pragma: no cover
         raise NotImplementedError
@@ -107,10 +107,11 @@ class FakeNotifier(Notifier):
             path=str(path),
         )
 
-    def send_text(self, text: str) -> NotificationResult:
+    def send_text(self, text: str, *, image_paths: list[str] | None = None) -> NotificationResult:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         stamp = to_iso(self.clock.now()).replace(":", "").replace("-", "")[:15]
         path = self.out_dir / f"outcome-{stamp}-{uuid.uuid4().hex[:6]}.json"
+        imgs = [str(p) for p in (image_paths or []) if str(p).strip()]
         path.write_text(
             json.dumps(
                 {
@@ -118,6 +119,7 @@ class FakeNotifier(Notifier):
                     "created_at": to_iso(self.clock.now()),
                     "notice": "本地假通知；没有发送到飞书。",
                     "text": text,
+                    "image_paths": imgs,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -130,6 +132,8 @@ class FakeNotifier(Notifier):
             message_id=f"fake-outcome-{uuid.uuid4().hex[:6]}",
             detail="written locally; Feishu was not contacted",
             path=str(path),
+            images_sent=len(imgs),
+            images_total=len(imgs),
         )
 
     def health(self) -> dict[str, Any]:
@@ -321,17 +325,46 @@ class LarkNotifier(Notifier):
             failed_images=tuple(failures),
         )
 
-    def send_text(self, text: str) -> NotificationResult:
-        # Text-only outcome to the same bound owner open_id (p2p).  This method
-        # deliberately has no recipient argument, so a callback cannot choose
-        # an arbitrary sender/chat.
+    def send_text(self, text: str, *, image_paths: list[str] | None = None) -> NotificationResult:
+        # Text (plus optional images such as login QR) to the same bound owner
+        # open_id (p2p).  This method deliberately has no recipient argument,
+        # so a callback cannot choose an arbitrary sender/chat.
         self._ensure()
         message_id = self._send_text(text)
+        paths = [str(p) for p in (image_paths or []) if str(p).strip()]
+        if not paths:
+            return NotificationResult(
+                ok=True,
+                channel="lark",
+                message_id=message_id,
+                detail="sent text to owner open_id via Feishu p2p chat",
+            )
+        sent_images: list[str] = []
+        failures: list[str] = []
+        for index, path in enumerate(paths, start=1):
+            try:
+                image_key = self._upload_image(path)
+                image_message_id = self._send_image(image_key)
+                if not image_message_id:
+                    failures.append(f"image {index}: no message id returned")
+                else:
+                    sent_images.append(image_message_id)
+            except Exception as exc:  # noqa: BLE001
+                failures.append(f"image {index}: {type(exc).__name__}: {exc}")
+        complete = not failures and len(sent_images) == len(paths)
+        detail = (
+            "sent text and images to owner open_id via Feishu p2p chat"
+            if complete
+            else "INCOMPLETE delivery: text sent but image delivery failed: " + "; ".join(failures)
+        )
         return NotificationResult(
-            ok=True,
+            ok=complete,
             channel="lark",
             message_id=message_id,
-            detail="sent text to owner open_id via Feishu p2p chat",
+            detail=detail,
+            images_sent=len(sent_images),
+            images_total=len(paths),
+            failed_images=tuple(failures),
         )
 
     def health(self) -> dict[str, Any]:

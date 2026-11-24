@@ -37,23 +37,6 @@ def hamming(a: int, b: int) -> int:
     return (int(a) ^ int(b)).bit_count()
 
 
-def _parse_bg_rgb(bg: str | tuple[int, int, int] | None, pixels, width: int, height: int) -> tuple[int, int, int]:
-    if isinstance(bg, tuple) and len(bg) == 3:
-        return (int(bg[0]), int(bg[1]), int(bg[2]))
-    if isinstance(bg, str):
-        raw = bg.strip().lstrip("#")
-        if len(raw) == 6:
-            try:
-                return (int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16))
-            except ValueError:
-                pass
-    # Fallback: sample center-top margin interior
-    sample_x = max(0, min(width - 1, width // 2))
-    sample_y = max(0, min(height - 1, 20))
-    px = pixels[sample_x, sample_y]
-    return (int(px[0]), int(px[1]), int(px[2]))
-
-
 def largest_blank_band(
     path: str | Path,
     bg: str | tuple[int, int, int] | None = None,

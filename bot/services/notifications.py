@@ -206,9 +206,11 @@ def queue_outcome(
     text: str,
     *,
     dedupe_key: str,
+    image_paths: list[str] | None = None,
+    cleanup_images: bool = False,
     conn: sqlite3.Connection | None = None,
 ) -> int:
-    """Queue a durable text outcome for the bound owner private chat.
+    """Queue a durable text (and optional image) outcome for the bound owner private chat.
 
     The payload carries no recipient: delivery always uses the notifier's
     configured owner open_id, never a sender supplied by the callback.
@@ -216,7 +218,12 @@ def queue_outcome(
     text = str(text or "").strip()
     if not text:
         raise ValueError("outcome notification text is empty")
-    payload = {"text": text}
+    payload: dict[str, Any] = {"text": text}
+    imgs = [str(p) for p in (image_paths or []) if str(p).strip()]
+    if imgs:
+        payload["image_paths"] = imgs
+    if cleanup_images:
+        payload["cleanup_images"] = True
     now = to_iso(clock.now())
 
     def _insert(target: sqlite3.Connection) -> int:
@@ -274,8 +281,16 @@ def deliver_pending(
         payload = json_loads(row["payload_json"], {}) or {}
         if row["kind"] == KIND_OUTCOME:
             text = str(payload.get("text") or "")
+            image_paths = [str(p) for p in (payload.get("image_paths") or []) if str(p).strip()]
+            cleanup_images = bool(payload.get("cleanup_images", False))
             try:
-                result = notifier.send_text(text)
+                if image_paths:
+                    try:
+                        result = notifier.send_text(text, image_paths=image_paths)
+                    except TypeError:
+                        result = notifier.send_text(text)
+                else:
+                    result = notifier.send_text(text)
             except Exception as exc:  # noqa: BLE001 - missing credentials must be explicit
                 attempts = int(row["attempts"]) + 1
                 state = "failed" if attempts >= 5 else "retry"
@@ -284,6 +299,14 @@ def deliver_pending(
                         "UPDATE notifications SET state=?, error=? WHERE id=?",
                         (state, f"{type(exc).__name__}: {exc}", row["id"]),
                     )
+                if cleanup_images and state == "failed":
+                    for img_path in image_paths:
+                        try:
+                            from pathlib import Path
+
+                            Path(img_path).unlink(missing_ok=True)
+                        except OSError:
+                            pass
                 results.append({"id": row["id"], "ok": False, "error": str(exc), "state": state})
                 continue
             if not result.ok:
@@ -294,6 +317,14 @@ def deliver_pending(
                         "UPDATE notifications SET state=?, error=? WHERE id=?",
                         (state, result.detail, row["id"]),
                     )
+                if cleanup_images and state == "failed":
+                    for img_path in image_paths:
+                        try:
+                            from pathlib import Path
+
+                            Path(img_path).unlink(missing_ok=True)
+                        except OSError:
+                            pass
                 results.append(
                     {"id": row["id"], "ok": False, "state": state, "detail": result.detail}
                 )
@@ -303,6 +334,14 @@ def deliver_pending(
                     "UPDATE notifications SET state='sent', sent_at=?, error=NULL WHERE id=?",
                     (to_iso(clock.now()), row["id"]),
                 )
+            if cleanup_images:
+                for img_path in image_paths:
+                    try:
+                        from pathlib import Path
+
+                        Path(img_path).unlink(missing_ok=True)
+                    except OSError:
+                        pass
             results.append(
                 {
                     "id": row["id"],

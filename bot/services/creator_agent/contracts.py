@@ -187,31 +187,3 @@ class Review:
 
     def as_dict(self) -> dict[str, Any]:
         return {"verdict": self.verdict, "issues": [i.as_dict() for i in self.issues], "summary": self.summary}
-
-
-@dataclass
-class RevisionItem:
-    instruction: str
-    disposition: Literal["addressed", "not_applicable", "unresolved"] = "unresolved"
-    evidence: str = ""
-
-    def as_dict(self) -> dict[str, Any]:
-        return dict(self.__dict__)
-
-
-@dataclass
-class RevisionPlan:
-    items: list[RevisionItem] = field(default_factory=list)
-    preserve: list[str] = field(default_factory=list)
-    change: list[str] = field(default_factory=list)
-    research_needed: list[str] = field(default_factory=list)
-    image_changes: list[str] = field(default_factory=list)
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "items": [i.as_dict() for i in self.items],
-            "preserve": list(self.preserve),
-            "change": list(self.change),
-            "research_needed": list(self.research_needed),
-            "image_changes": list(self.image_changes),
-        }

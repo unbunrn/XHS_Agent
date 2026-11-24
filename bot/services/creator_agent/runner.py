@@ -399,6 +399,10 @@ class AgentRunner:
             action = str(step.get("action") or "")
             if action == "render_images" and step.get("status") in {"ok", "failed"}:
                 render_attempted_since_draft = True
+                if step.get("status") == "failed":
+                    # A failed render (e.g. card text overflow) legitimately
+                    # requires another revise_artifact to shorten the copy.
+                    break
             if step.get("status") != "ok":
                 continue
             if action == "revise_artifact":

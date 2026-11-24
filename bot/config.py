@@ -90,7 +90,6 @@ DEFAULTS: dict[str, Any] = {
         "max_drafts_per_day": 1,
         "max_queued_topics": 3,
         "max_pending_approvals": 3,
-        "max_candidates_per_round": 3,
         "max_publish_per_day": 1,
         "max_manual_publish_per_day": 1,
         "max_publish_attempts_per_task": 3,
@@ -98,7 +97,6 @@ DEFAULTS: dict[str, Any] = {
         "max_age_hours": 72,
         "event_window_days": 7,
         "poll_interval_seconds": 1800,
-        "poll_jitter_seconds": 120,
         "approval_ttl_hours": 24,
         "publish_immediately": False,
         "publish_hour_local": 20,
@@ -236,7 +234,6 @@ DEFAULTS: dict[str, Any] = {
             "expected_red_id": "",
             "publish_path": "/api/v1/publish",
             "timeout_seconds": 60,
-            "connect_timeout_seconds": 8,
         },
     },
     # console：本机审批网页。默认只监听 127.0.0.1，外部电脑访问不到。
@@ -302,49 +299,9 @@ DEFAULTS: dict[str, Any] = {
     "typography": {
         "fullwidth_tilde": False,
     },
-    # topics：手机飞书“选题/写一篇”请求的独立护栏。
-    # 它与 limits.max_drafts_per_day 相互独立：选题请求的数量上限控制的是
-    # “允许多少次检索/写作委托”，真正写稿仍受每日草稿、待审批和预算限制。
+    # topics：AIHot 发现源地址。
     "topics": {
-        "max_input_chars": 4000,
-        "max_pending": 3,
-        "max_per_day": 5,
-        "search_max_results": 5,
-        "search_max_fetches": 2,
-        "search_lookback_days": 7,
-        # S1 research pipeline bounds.  The physical-attempt cap includes
-        # retries and is not a "number of successes" cap.
-        "research_max_fetch_attempts": 6,
-        "research_cache_hours": 6,
-        "research_min_usable": 1,
-        "research_min_body_chars": 0,
-        # 模型只在“已配置可信域名找不到证据”时，为这一次选题提出候选官方
-        # 域名并做一次补充检索。候选域名不会写入配置或长期可信集合；最终
-        # 仍要 owner 审批稿件。关闭时完全保持原来的 fail-closed 行为。
-        "model_source_review": False,
-        "model_source_min_confidence": 0.7,
-        "model_source_max_domains": 3,
-        "model_source_max_output_tokens": 500,
-        # S2: one batch source-identity judge over actually fetched material.
-        "model_identity": True,
-        "identity_max_output_tokens": 1800,
-        "identity_cache_hours": 24,
-        "identity_min_confidence": 0.6,
-        # One bounded evidence-gap rescue when the writer refuses for thin
-        # evidence.  Its separate physical budget is small and auditable; it
-        # still uses the normal body/date/identity gates.
-        "auto_rescue": False,
-        "rescue_max_fetch": 2,
-        # S3: news stays 72h; analysis is an explicit owner request for old
-        # material and never rewrites original dates into "today".
-        "analysis_max_age_hours": 24 * 365 * 5,
-        # AIHot is a discovery feed, not an official source.  Auto-match is
-        # deliberately lexical and conservative; a weak match falls back to
-        # ordinary search.  Original links are always fetched first.
-        "aihot_enabled": False,
-        "aihot_auto_match": False,
         "aihot_feed_url": "https://aihot.news/feed.xml",
-        "aihot_max_items": 50,
     },
     # revision：修改稿的验收边界。  A revision gets at most one generation
     # call and one bounded semantic-review call through the normal budget.
@@ -563,14 +520,6 @@ class Config:
         for key in ("max_drafts_per_day", "max_pending_approvals", "max_publish_per_day", "max_manual_publish_per_day", "max_manual_drafts_per_day"):
             if int(self.get(f"limits.{key}")) < 0:
                 raise ConfigError(f"limits.{key} must be >= 0")
-        for key in ("max_input_chars", "max_pending", "max_per_day"):
-            if int(self.get(f"topics.{key}")) < 0:
-                raise ConfigError(f"topics.{key} must be >= 0")
-        confidence = float(self.get("topics.model_source_min_confidence", 0.7))
-        if not 0.0 <= confidence <= 1.0:
-            raise ConfigError("topics.model_source_min_confidence must be between 0 and 1")
-        if int(self.get("topics.model_source_max_domains", 3)) < 0:
-            raise ConfigError("topics.model_source_max_domains must be >= 0")
         if self.mode == "live":
             if llm == "fake" and not self.get("app.allow_fake_in_live", False):
                 warnings.append("live mode with llm.provider=fake (explicitly allowed) will not call DeepSeek")
@@ -666,20 +615,6 @@ class Config:
         if self.get("publisher.live_enabled") and self.demo_pipeline:
             problems.append("demo/fixture pipeline cannot enable real publishing; use real sources and DeepSeek")
         return problems
-
-    # -- helpers --------------------------------------------------------
-    def redacted(self) -> dict[str, Any]:
-        """Config view safe to log: secret-bearing keys replaced."""
-        # 深拷贝后把可能含密钥的字段替换成 ***。
-        # 任何要展示完整配置的地方都应该先经过这里，避免手滑打日志泄露。
-        data = copy.deepcopy(self.data)
-        for key in ("xiaohongshu",):
-            section = data.get("publisher", {}).get(key)
-            if isinstance(section, dict):
-                for secret in ("token", "cookie", "password"):
-                    if secret in section:
-                        section[secret] = "***"
-        return data
 
 
 def _env_secrets(root: Path, config: dict[str, Any]) -> Secrets:

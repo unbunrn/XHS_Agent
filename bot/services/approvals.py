@@ -202,17 +202,6 @@ def get_approval(db: Database, *, code: str | None = None, approval_id: int | No
     return None
 
 
-def list_pending(db: Database, limit: int = 20) -> list[sqlite3.Row]:
-    # 同时带出草稿当前的正文/图片哈希，控制台可以对比“审批绑定的”
-    # 和“数据库现在的”是否一致，提前发现内容漂移。
-    return db.fetchall(
-        "SELECT a.*, d.title, d.body_sha256 AS current_body_sha256, d.images_sha256 AS current_images_sha256 "
-        "FROM approvals a JOIN drafts d ON d.id=a.draft_id "
-        "WHERE a.status='pending' ORDER BY a.created_at LIMIT ?",
-        (int(limit),),
-    )
-
-
 def _refresh_artifact_hashes(
     db: Database, draft_id: int, *, conn: sqlite3.Connection | None = None
 ) -> tuple[str, str, list[dict[str, Any]], list[str]]:
@@ -390,7 +379,7 @@ def _parse_command(text: str) -> tuple[str | None, str, str]:
     return None, "", ""
 
 
-COMMAND_HELP = 'AI 运营助手 · 使用帮助\n【写稿】\n选题 <主题或链接>：可同时说明受众、角度和风格。\n修改 <具体意见>：修改最近一篇可修改作品；多篇同时处理时请先核对对象。\n\n【审批】\n批准 XH-XXXXXX：同意真实发布对应版本；先看完整正文和图片。\n拒绝 XH-XXXXXX：拒绝这份审批。\n请用机器人发给你的实际 XH 审批码替换示例编号。\n\n【发布与故障处理】\n发布状态 XH-XXXXXX：查看进度。\n检查原因 XH-XXXXXX：只检查，不触发发布。\n修复并重试 XH-XXXXXX：修复可处理的问题；结果未知时先查原发送，不直接重发。\n已登录 XH-XXXXXX：你完成扫码后，继续这篇任务；机器人会重新核验账号。编号标识作品，不是登录凭据。\n暂停发布 XH-XXXXXX / 继续发布 XH-XXXXXX：暂停或恢复任务。\n取消发布 XH-XXXXXX：停止后续提交；不能撤回已发帖，在途发送仍需查结果。\n确认未发布并重试 XH-XXXXXX：仅在你核实平台确实没有发布后使用。\n\n扫码是恢复账号登录，带编号是指定继续哪一篇。先按机器人提示完成登录，再发“已登录 编号”，这句话本身不会完成登录。\n例：选题 AI 智能体记忆，用生活例子解释，少用术语。\n例：修改 开头改成我的观点，保留第二张图。\n随时发送 帮助、菜单 或 help 查看本说明。'
+COMMAND_HELP = 'AI 运营助手 · 使用帮助\n【写稿】\n选题 <主题或链接>：可同时说明受众、角度和风格。\n修改 <具体意见>：修改最近一篇可修改作品；多篇同时处理时请先核对对象。\n\n【审批】\n批准 XH-XXXXXX：同意真实发布对应版本；先看完整正文和图片。\n拒绝 XH-XXXXXX：拒绝这份审批。\n请用机器人发给你的实际 XH 审批码替换示例编号。\n\n【发布与故障处理】\n发布状态 XH-XXXXXX：查看进度。\n检查原因 XH-XXXXXX：只检查，不触发发布。\n修复并重试 XH-XXXXXX：修复可处理的问题；结果未知时先查原发送，不直接重发。\n刷新二维码：获取最新小红书登录二维码图片（二维码过期时可直接重发此命令）。\n已登录 XH-XXXXXX：你完成扫码后，继续这篇任务；机器人会重新核验账号。编号标识作品，不是登录凭据。\n暂停发布 XH-XXXXXX / 继续发布 XH-XXXXXX：暂停或恢复任务。\n取消发布 XH-XXXXXX：停止后续提交；不能撤回已发帖，在途发送仍需查结果。\n确认未发布并重试 XH-XXXXXX：仅在你核实平台确实没有发布后使用。\n\n扫码是恢复账号登录，带编号是指定继续哪一篇。先按机器人提示完成登录，再发“已登录 编号”，这句话本身不会完成登录。\n例：选题 AI 智能体记忆，用生活例子解释，少用术语。\n例：修改 开头改成我的观点，保留第二张图。\n随时发送 帮助、菜单、help 或 /help 查看本说明。'
 
 _PUBLICATION_COMMAND_RE = re.compile(
     r"^(发布状态|检查原因|修复并重试|已登录|取消发布|拒绝发布|暂停发布|继续发布|确认未发布并重试)"
@@ -583,6 +572,83 @@ def handle_inbound_message(
                 dedupe_key=f"help:{message_id}", conn=conn,
             )
         return {"ok": True, "outcome": "help"}
+
+    qr_match = re.match(
+        r"^(刷新二维码|获取二维码|登录二维码|小红书登录)(?:\s+(XH-[A-Z0-9]{4,12}))?$",
+        pub_text,
+        re.IGNORECASE,
+    )
+    if qr_match is not None:
+        if not is_p2p:
+            return _record_rejected(
+                db, now, message_id, channel, sender_id, chat_id, chat_type,
+                text, "rejected_chat_type", "获取登录二维码仅支持本人私聊",
+            )
+        target_code = (qr_match.group(2) or "").strip().upper()
+        with db.tx() as conn:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO inbound_messages"
+                "(message_id,channel,sender_id,chat_id,chat_type,text,received_at,outcome,detail) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (message_id, channel, sender_id, chat_id, chat_type,
+                 text[:4000], now, "processing", None),
+            )
+            if not cursor.rowcount:
+                return {"ok": False, "duplicate": True, "outcome": "login_qrcode"}
+        from ..adapters.publishers import XiaohongshuPublisher
+
+        qr_result: dict[str, Any]
+        try:
+            pub = XiaohongshuPublisher(config, clock, allow_unarmed=True)
+            qr_result = pub.fetch_login_qrcode()
+        except Exception as exc:  # noqa: BLE001
+            qr_result = {
+                "ok": False,
+                "already_logged_in": False,
+                "detail": f"无法连接本机小红书桥接：{type(exc).__name__}: {exc}",
+            }
+
+        code_hint = target_code or "XH-XXXXXX"
+        image_paths: list[str] = []
+        cleanup = False
+        if qr_result.get("ok") and qr_result.get("image_path"):
+            timeout = str(qr_result.get("timeout") or "").strip()
+            timeout_hint = f"（有效期约 {timeout}）" if timeout else ""
+            reply = (
+                f"已为你获取最新小红书登录二维码{timeout_hint}，请用小红书 App 扫码登录。\n"
+                f"• 二维码若过期，可随时再次回复：刷新二维码\n"
+                f"• 扫码完成后，如有待发布任务请回复：已登录 {code_hint}"
+            )
+            image_paths = [str(qr_result["image_path"])]
+            cleanup = True
+            outcome = "login_qrcode_sent"
+        elif qr_result.get("ok") and qr_result.get("already_logged_in"):
+            reply = (
+                "小红书桥接当前已处于登录状态，无需重新扫码。\n"
+                f"如有等待登录的发布任务，请直接回复：已登录 {code_hint} 继续发布。"
+            )
+            outcome = "login_already_active"
+        else:
+            detail_msg = str(qr_result.get("detail") or "未知错误")
+            reply = f"获取小红书登录二维码失败：{detail_msg}\n请确认本机小红书容器运行正常后，再次回复：刷新二维码。"
+            outcome = "login_qrcode_failed"
+
+        with db.tx() as conn:
+            conn.execute(
+                "UPDATE inbound_messages SET outcome=?, detail=? WHERE message_id=?",
+                (outcome, json_dumps({"detail": str(qr_result.get("detail") or ""), "ok": bool(qr_result.get("ok"))}), message_id),
+            )
+            notifications.queue_outcome(
+                db,
+                config,
+                clock,
+                reply,
+                dedupe_key=f"inbound:{message_id}",
+                image_paths=image_paths,
+                cleanup_images=cleanup,
+                conn=conn,
+            )
+        return {"ok": bool(qr_result.get("ok")), "outcome": outcome, "message_id": message_id}
 
     if bool(config.get("publication_agent.enabled", False)) and re.match(
         r"^(发布状态|检查原因|修复并重试|已登录|取消发布|拒绝发布|暂停发布|继续发布|确认未发布并重试)\s*XH-",
@@ -1183,15 +1249,3 @@ def _outcome_text(outcome: str, detail: str, extra: dict[str, Any]) -> str:
         lines.append(f"审批码：{extra['code']}")
     lines.append(str(detail))
     return "\n".join(lines)
-
-
-def decision_view(db: Database, approval_id: int) -> dict[str, Any] | None:
-    # 控制台详情视图：审批记录 + 对应草稿 + 解析后的决策备注。
-    approval = get_approval(db, approval_id=approval_id)
-    if approval is None:
-        return None
-    view = dict(approval)
-    draft = db.fetchone("SELECT * FROM drafts WHERE id=?", (approval["draft_id"],))
-    view["draft"] = dict(draft) if draft is not None else None
-    view["decision_detail"] = json_loads(view.get("decision_comment"), None)
-    return view

@@ -645,13 +645,6 @@ class Worker:
             log.info("worker stopped")
 
 
-def run_once(config: Config, *, clock: Clock | None = None) -> dict[str, Any]:
-    # CLI / 测试用：启动一次，跑一轮 tick 就结束，不常驻。
-    worker = Worker(config, clock=clock)
-    worker.startup()
-    return worker.tick()
-
-
 def main(config_path: str | None = None) -> int:
     # 进程入口：加载配置 -> 设置日志轮转 -> 创建 Worker -> 常驻运行。
     # 返回 0 表示正常退出。

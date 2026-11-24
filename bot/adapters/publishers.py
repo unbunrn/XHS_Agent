@@ -287,6 +287,9 @@ class XiaohongshuPublisher(Publisher):
         self.login_status_path = str(
             config.get("publisher.xiaohongshu.login_status_path", "/api/v1/login/status")
         )
+        self.login_qrcode_path = str(
+            config.get("publisher.xiaohongshu.login_qrcode_path", "/api/v1/login/qrcode")
+        )
         self.user_me_path = str(
             config.get("publisher.xiaohongshu.user_me_path", "/api/v1/user/me")
         )
@@ -443,6 +446,79 @@ class XiaohongshuPublisher(Publisher):
         # An absent/unknown login flag is not treated as success by itself;
         # /api/v1/user/me below must still return a concrete user id.
         return True, "login check did not report a failure", logged_in
+
+    def fetch_login_qrcode(self, *, out_dir: Path | None = None) -> dict[str, Any]:
+        """Fetch a fresh Xiaohongshu login QR code PNG from the local loopback bridge.
+
+        The decoded PNG is written only to a local project temp file for direct
+        owner p2p delivery; base64 data and tokens are never logged or exposed
+        to any model context.
+        """
+        import base64
+        import uuid
+
+        if not self.token:
+            return {"ok": False, "already_logged_in": False, "detail": "小红书桥接 token 未配置，无法获取二维码"}
+        try:
+            status, payload = self._get_json(self.login_qrcode_path)
+        except Exception as exc:  # noqa: BLE001 - report failure without secrets
+            return {
+                "ok": False,
+                "already_logged_in": False,
+                "detail": f"连接本机小红书桥接失败：{type(exc).__name__}: {exc}",
+            }
+        if status in {401, 403}:
+            return {"ok": False, "already_logged_in": False, "detail": "小红书桥接拒绝了鉴权 token"}
+        if status != 200:
+            return {"ok": False, "already_logged_in": False, "detail": f"小红书桥接返回 HTTP {status}"}
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+        if isinstance(data, dict) and data.get("is_logged_in") is True:
+            return {
+                "ok": True,
+                "already_logged_in": True,
+                "timeout": str(data.get("timeout") or ""),
+                "detail": "小红书当前已处于登录状态，无需重新扫码。",
+            }
+        raw_img = ""
+        if isinstance(data, dict):
+            for key in ("img", "qrcode", "qr_code", "image", "base64"):
+                val = data.get(key)
+                if isinstance(val, str) and val.strip():
+                    raw_img = val.strip()
+                    break
+        if not raw_img:
+            return {
+                "ok": False,
+                "already_logged_in": False,
+                "detail": "桥接接口未返回二维码图片，请稍后重试或检查小红书容器状态。",
+            }
+        encoded = raw_img.split(",", 1)[1] if "," in raw_img and raw_img.lower().startswith("data:") else raw_img
+        try:
+            png_bytes = base64.b64decode(encoded, validate=False)
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "already_logged_in": False,
+                "detail": f"二维码图片解码失败：{type(exc).__name__}",
+            }
+        if not png_bytes or len(png_bytes) < 64:
+            return {
+                "ok": False,
+                "already_logged_in": False,
+                "detail": "桥接返回的二维码数据为空或异常。",
+            }
+        target_dir = out_dir or self.config.resolve_path("var/tmp/xhs_qr")
+        target_dir.mkdir(parents=True, exist_ok=True)
+        path = target_dir / f"xhs-qr-{uuid.uuid4().hex[:10]}.png"
+        path.write_bytes(png_bytes)
+        timeout = str(data.get("timeout") or "").strip() if isinstance(data, dict) else ""
+        return {
+            "ok": True,
+            "already_logged_in": False,
+            "image_path": str(path),
+            "timeout": timeout,
+            "detail": "已获取最新小红书登录二维码。",
+        }
 
     def _identity_check(self) -> tuple[bool, str, str | None]:
         """Ask the bridge which account is logged in, before any publish POST."""
@@ -781,24 +857,6 @@ class XiaohongshuPublisher(Publisher):
                 "confirmed_at": to_iso(self.clock.now()),
             },
         )
-
-
-class DisabledPublisher(Publisher):
-    """A stand-in that explains why no publisher is available."""
-    # 占位发布器：不做事，只说明“为什么没有可用的发布器”。
-    # 它的存在让上层代码不必到处写 if publisher is None。
-
-    name = "disabled"
-    mode = "disabled"
-
-    def __init__(self, reason: str):
-        self.reason = reason
-
-    def publish(self, request: PublishRequest) -> PublishOutcome:
-        raise PublishFailed(self.reason, retryable=False)
-
-    def health(self) -> dict[str, Any]:
-        return {"ok": False, "mode": "disabled", "configured": False, "detail": self.reason}
 
 
 def build_publisher(config: Config, clock: Clock, *, health_only: bool = False) -> Publisher:

@@ -57,14 +57,12 @@ status = "unverified"
 max_drafts_per_day = 1
 max_queued_topics = 3
 max_pending_approvals = 3
-max_candidates_per_round = 3
 max_publish_per_day = 1
 # Per-task hard cap on publish attempts; a safe retry does not consume another work slot.
 max_publish_attempts_per_task = 3
 max_age_hours = 72
 event_window_days = 7
 poll_interval_seconds = 1800
-poll_jitter_seconds = 120
 approval_ttl_hours = 24
 # true：owner 批准后立即尝试发布；false：等到 publish_hour_local 的时段。
 publish_immediately = false
@@ -105,31 +103,10 @@ daily_discovery_feed_limit = 50
 # 默认关闭，接入真实模型并确认 token 预算后再打开。
 semantic_review = false
 
-# 【委托选题】可信域名检索不到时，模型可对当前这一条选题建议官方域名并补充搜索一次。
-# 建议默认关闭；开启后也只在单条选题内生效，不会写入长期可信源，最终仍需 owner 审批。
+# 【委托选题】AIHot 发现源配置。
 [topics]
-# 每个本地自然日最多接受的选题请求数；按历史记录计数，不因服务重启清零。
-max_per_day = 5
-# 旧的单轮“模型补域名”路径保留用于历史配置；当前 S2 使用一次批量
-# 来源身份判定，仍共享下方抓取/预算上限。
-model_source_review = false
-model_source_min_confidence = 0.7
-model_source_max_domains = 3
-model_source_max_output_tokens = 500
-model_identity = true
-identity_max_output_tokens = 1800
-identity_cache_hours = 24
-identity_min_confidence = 0.6
-# 写稿因“证据不足”拒绝时做一次有界补检；默认关闭，补检仍受来源/时效/身份/预算约束。
-auto_rescue = false
-rescue_max_fetch = 2
-research_cache_hours = 6
-analysis_max_age_hours = 43200
-# AIHot discovery: original links first; summaries are labelled aggregators.
-aihot_enabled = true
-aihot_auto_match = true
+# AIHot discovery feed URL.
 aihot_feed_url = "https://aihot.news/feed.xml"
-aihot_max_items = 50
 
 # 【网络】超时、响应大小上限、同站限速、重试与退避。
 # allow_private_hosts 只放行明确需要的本机服务；新闻源永远不要加进来。
@@ -223,7 +200,6 @@ user_me_path = "/api/v1/user/me"
 expected_red_id = ""
 publish_path = "/api/v1/publish"
 timeout_seconds = 60
-connect_timeout_seconds = 8
 # Optional Docker bridge path mapping.  Leave both commented out for the native
 # Windows bridge, which receives absolute host image paths unchanged.  When the
 # bridge container mounts <project>\var\drafts read-only at /app/images, set

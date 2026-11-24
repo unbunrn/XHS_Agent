@@ -726,11 +726,6 @@ class ConsoleApp:
         return "控制台口令来自配置。"
 
 
-def create_console(config: Config, *, clock: Any | None = None, llm: Any | None = None) -> ConsoleApp:
-    # 给脚本/测试用的便捷工厂；正式启动走下面的 main()。
-    return ConsoleApp(config, clock=clock, llm=llm)
-
-
 def main(config_path: str | None = None) -> int:
     # 控制台进程入口：加载配置 -> 初始化日志 -> 创建并启动 HTTP 服务。
     # Ctrl+C 时安静退出，最后一定关闭监听端口。

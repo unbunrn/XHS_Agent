@@ -155,8 +155,3 @@ class PublishOutcome:
     # not_dispatched/login_expired/asset_missing/rejected/unknown_result.
     failure_class: str = ""
     retryable: bool = False
-
-    @property
-    def is_real(self) -> bool:
-        # 只有 published 才算真实发布；simulated 永远不算。
-        return self.state == "published"

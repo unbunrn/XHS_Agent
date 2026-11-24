@@ -12,6 +12,7 @@ from ...db import Database
 from ...jobs import enqueue_job
 from ...timeutil import Clock, parse_iso, to_iso
 from .. import approvals
+from .diagnostics import format_attempt_status, latest_attempt
 from .store import PublicationStore
 
 
@@ -221,26 +222,11 @@ def _local_time(value: Any) -> str:
 
 
 def _latest_attempt(db: Database, task_id: int) -> dict[str, Any] | None:
-    row = db.fetchone(
-        "SELECT * FROM publish_attempts WHERE publication_task_id=? ORDER BY id DESC LIMIT 1",
-        (int(task_id),),
-    )
-    return dict(row) if row is not None else None
+    return latest_attempt(db, task_id)
 
 
 def _attempt_line(attempt: dict[str, Any] | None) -> str:
-    if attempt is None:
-        return "提交情况：尚未提交到小红书（没有发送记录）。"
-    state = str(attempt.get("state") or "")
-    if state == "published":
-        return "提交情况：平台已确认发布。"
-    if state in {"unknown", "publishing"}:
-        return "提交情况：上次发送结果未确认，可能已经提交；请先只读核对，不要直接重发。"
-    if state == "simulated":
-        return "提交情况：只在测试环境模拟发布，没有真实上架。"
-    if state == "failed" and str(attempt.get("dispatch_state") or "") == "not_dispatched":
-        return "提交情况：最近一次发送没有真正发出，尚未发布。"
-    return "提交情况：最近一次发送未成功，尚未确认发布。"
+    return format_attempt_status(attempt, include_attempt_id=False)
 
 
 def _wait_reason_text(reason: str | None) -> str:
