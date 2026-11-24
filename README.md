@@ -103,7 +103,7 @@ powershell -ExecutionPolicy Bypass -File scripts\fetch_fonts.ps1
    lark_owner_open_id = "your-personal-open-id"
    xiaohongshu_token = "your-local-bridge-token"
    ```
-   详细配置指引参见 [飞书配置指南](docs/FEISHU_SETUP.md) 与 [小红书容器桥接方案](docs/XHS_CONTAINER_PLAN.md)。
+   详细配置指引参见 [飞书配置指南](docs/FEISHU_SETUP.md)、[小红书桥接配置](docs/XHS_BRIDGE_SETUP.md) 与 [容器图片路径映射](docs/CONTAINER_IMAGE_PATHS.md)。
 3. **启动服务**：
    ```powershell
    # 仅测试选题、写稿、渲染与飞书审批（安全试运行，关闭真实发帖）
