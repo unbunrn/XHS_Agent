@@ -71,6 +71,7 @@ def make_config(
     # 从项目默认配置深拷贝一份，再按测试需要覆盖。
     # 深拷贝很重要：多个测试共享 DEFAULTS，直接改会互相污染。
     data = copy.deepcopy(DEFAULTS)
+    data["render"]["engine"] = "pillow"
     data["app"].update(
         {
             "mode": mode,

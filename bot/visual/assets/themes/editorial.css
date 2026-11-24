@@ -1,0 +1,72 @@
+/* Theme: Editorial (杂志社论) */
+body.theme-editorial {
+  --font-display: "BotDisplay", "BotBody", serif;
+  --font-body: "BotBody", sans-serif;
+  --radius: 16px;
+}
+
+body.theme-editorial::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgba(0, 0, 0, 0.055) 1px, transparent 1px);
+  background-size: 6px 6px;
+  opacity: 0.45;
+  z-index: 1;
+}
+
+body.theme-editorial::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 14px;
+  background: var(--accent);
+  z-index: 3;
+}
+
+body.theme-editorial .folio {
+  border-bottom: 3px solid var(--ink);
+  padding-bottom: 18px;
+  letter-spacing: 0.2em;
+}
+
+body.theme-editorial .cover-subcard {
+  background: transparent;
+  border: none;
+  border-top: 2px solid var(--rule);
+  border-radius: 0;
+  padding: 28px 0 0 0;
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+body.theme-editorial .cover-quote-badge {
+  font-family: var(--font-display);
+  font-size: 96px;
+  line-height: 0.95;
+  color: var(--accent);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+body.theme-editorial .card-headline {
+  border-left: 8px solid var(--accent);
+  padding-left: 24px;
+}
+
+body.theme-editorial.is-cover .kicker {
+  align-self: center;
+}
+
+body.theme-editorial.is-cover .cover-hero {
+  align-items: center;
+  text-align: center;
+}
+
+body.theme-editorial.is-cover .cover-subcard {
+  width: 100%;
+}

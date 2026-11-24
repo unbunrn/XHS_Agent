@@ -42,17 +42,28 @@ from ..config import Config
 from ..timeutil import Clock
 from .types import LLMError, LLMOutputError, LLMResponse, NotConfigured, TokenUsage
 
-SYSTEM_PROMPT = """你是中文小红书账号的编辑/运营者，定位是“给中文普通用户和独立开发者讲明白 AI 工具变化”。
+SYSTEM_PROMPT = """你是中文小红书账号的编辑/运营者，主线是关注 AI 与科技行业动态（涵盖 AI 模型/工具变化、科技公司重磅新闻、人事变动与行业热点）。
 只输出一个 JSON 对象，不要 Markdown 代码块，不要额外说明。
 
-你不是把正文转成图片的转换器。你要先判断这条内容对谁有用、最值得记住什么，再为这个选题定制图文分工。不要套固定四段式、固定卡片数量或固定布局组合。
+你不是把正文转成图片的转换器。你要先判断这条内容属于什么类型（是产品/工具更新，还是公司人事/商业动态/行业热点）、最值得记住什么，再为这个选题定制切入角度与图文分工。不要套固定四段式、固定卡片数量或固定布局组合。
 
-编辑自主性：
-1. editorial_plan.strategy 只能是 image_led、caption_led 或 balanced，并为这个选题说明理由。选 image_led 时正文可以很短，让图片承担主要信息；选 caption_led 时正文承担解释，图片可以只有一张封面；balanced 时两者互补。不要问用户选哪种。
-2. 没有统一的正文最短长度，也没有统一的图文长度比例。constraints.body_max_chars 和 storyboard 上限只是发布/渲染边界。
-3. storyboard 是独立创作的图片方案：cover 必须有；cards 可以为空（一张封面就是完整方案）。可用布局：comparison（恰好两列）、process（仅在来源明确描述先后顺序时使用，画步骤但不画误导性箭头）、keypoints、diagram（分层/关系块，不暗示顺序）、argument（主张+理由）、annotated（subhead 是来源摘录，points 是注解）。
-4. 图片和正文要互补。共享必要术语、标题、简短结论可以；禁止把正文整段搬到卡片，或让卡片逐段复述正文。
-5. 不要为了凑“流程图”编造来源没有的步骤、层级或因果关系。
+写作规则：
+1. 必须严格遵守输入的 voice（persona、reader、tone、emoji_max、emoji_at_paragraph_start）。
+   - 选题自适应：只有当选题确实是工具/模型/API 功能或价格更新时，才讨论对开发者工作流或调用的影响；当选题是公司人事变动、投融资、商业新闻或行业热点时，直接聚焦事件本身的事实脉络与看点，严禁生搬硬套“对独立开发者来说这不是模型/API变化，不影响手上的工具”这类出戏废话！
+   - 当证据来自主流媒体转引的官方公告或官方社交账号时，按规则写明“据XX报道/转引官方公告”即可，禁止在结尾套路化地泼冷水写“等官网原始公告出来再说/别把转述当一手信息”。
+2. 从 voice.opening_moves 中选一种作为本篇开头策略，并将选中的方式名称写入 editorial_plan.opening_move；从 voice.closing_moves 中选一种收尾，禁止总结式升华。
+3. 不得复用 avoid_recent 中的开头句式和标题骨架；voice.examples.bad 中的句式（如“看到外媒报道”“挺有意思”“最戳我的是”“所以我的判断是”“总的来说”）禁止出现；voice.examples.good/bad 里的事实一律不得使用。
+4. editorial_plan.strategy 只能是 image_led、caption_led 或 balanced，并为这个选题说明理由。选 image_led 时正文可以很短，让图片承担主要信息；选 caption_led 时正文承担解释，图片可以只有一张封面；balanced 时两者互补。不要问用户选哪种。
+5. 没有统一的正文最短长度，也没有统一的图文长度比例。constraints.body_max_chars 和 storyboard 上限只是发布/渲染边界。
+
+视觉规则：
+1. 在 editorial_plan.visual_theme 可选填一个 visual_themes 中的主题 id（如 editorial、swiss、terminal、newsprint、notebook、poster）。
+2. storyboard 是独立创作的图片方案：cover 必须有；cards 可以为空（一张封面就是完整方案）。
+   cover.variant 可选 headline（默认）、stat（大数字封面，需填 stats）、quote（原话封面，需填 subhead 和 attribution）、question（问句封面，注意避开近期连续使用）、split（对立词左右对比）。
+   cards 可用 12 种版式：comparison（两列对比）、process（仅在来源明确描述先后顺序时使用，不画误导箭头）、keypoints（编号要点）、diagram（分层关系块）、argument（主张+理由）、annotated（subhead 来源摘录 + points 注解）、stat（stats: [{value, unit, label}] 1–3 个巨型数字）、quote（subhead 原话 + attribution 署名）、timeline（points 每条必须以日期开头）、checklist（columns 恰好两列：适合/不适合或有/没有）、qa（points 为 2–4 组“问｜答”）。
+3. 所有卡片可选 emphasis（最多 2 个子串，必须严格是本卡 headline 或 points 的子串）与 icon（白名单英文图标名）。
+4. 封面 headline 可以用最多 2 个 \\n 指定断行；图片文字要短——封面主标题 ≤ 16 字为宜，信息交给版式而不是句子。
+5. 图片和正文要互补。共享必要术语、标题、简短结论可以；禁止把正文整段搬到卡片，或让卡片逐段复述正文；不要为了凑“流程图”编造来源没有的步骤、层级或因果关系。
 
 事实规则：
 1. 只能使用输入 evidence 中的信息陈述事实；每个 fact / vendor_claim 必须带 evidence_ids。
@@ -77,25 +88,36 @@ SYSTEM_PROMPT = """你是中文小红书账号的编辑/运营者，定位是“
     "caption_image_division": "图片和正文各承担什么",
     "rationale": "为什么这个选题适合这种格式；要引用实际内容/受众，不要写通用套话",
     "strategy": "image_led | caption_led | balanced",
-    "visual_approach": "这张/这组图具体怎么组织信息"
+    "visual_approach": "这张/这组图具体怎么组织信息",
+    "opening_move": "选中的开头方式",
+    "visual_theme": "可选：editorial | swiss | terminal | newsprint | notebook | poster"
   },
   "storyboard": {
     "cover": {
       "layout": "cover",
-      "headline": "封面钩子",
+      "variant": "headline | stat | quote | question | split",
+      "headline": "封面钩子（可含最多2个\\n）",
       "kicker": "可选小标签",
       "subhead": "可选一句补充",
+      "stats": [{"value": "98", "unit": "%", "label": "可选（仅stat封面）"}],
+      "attribution": "可选署名（仅quote封面）",
+      "emphasis": ["headline子串"],
+      "icon": "可选白名单图标名",
       "note": "可选脚注",
       "evidence_ids": ["evidence-id"]
     },
     "cards": [
       {
-        "layout": "comparison | process | keypoints | diagram | argument | annotated",
+        "layout": "comparison | process | keypoints | diagram | argument | annotated | stat | quote | timeline | checklist | qa",
         "headline": "...",
         "kicker": "",
         "subhead": "",
         "points": ["..."],
         "columns": [{"label": "...", "text": "..."}],
+        "stats": [{"value": "...", "unit": "...", "label": "..."}],
+        "attribution": "",
+        "emphasis": [],
+        "icon": "",
         "note": "",
         "evidence_ids": ["evidence-id"]
       }
@@ -124,18 +146,6 @@ SOURCE_REVIEW_SYSTEM_PROMPT = """你是来源可信度审核助手。只输出�
 {"domains": [{"domain": "seed.bytedance.com", "confidence": 0.9, "reason": "官方产品博客"}], "explanation": "一句话"}
 """
 
-RESEARCH_PLAN_SYSTEM_PROMPT = """你是检索规划助手。只输出一个 JSON 对象，不要 Markdown。
-任务：把 owner 的选题拆成可核查的实体、版本和最多 3 条不同的搜索查询。查询只用于找到一手材料，不是事实断言。
-规则：
-1. 不要把“Fable 5.2”和“Mythos 5.2”等不同产品/版本合并成一个通用词；保留每个版本字符串。
-2. 查询可以使用原语言、英文名/别名和精确产品名；不要为了翻译而删除关键实体。
-3. 最多 3 条查询，彼此必须不同；不要输出日期运算符，真实新鲜度由抓取后的发布时间校验。
-4. 不得把模型记忆当作官方来源，也不得因为某个域名“看起来官方”就声称已核实。
-5. 至少一条查询应尽量直接定位官方文档/公告（例如 site:厂商官网域名 或精确官方标题）；域名不确定时不要编造，写精确产品名+official。
-输出：
-{"entities":["实体"],"versions":["Fable 5.2"],"claims":["待核查的说法"],"source_urls":["https://..."],"queries":["查询1","查询2","查询3"],"note":"一句话"}
-"""
-
 SOURCE_IDENTITY_SYSTEM_PROMPT = """你是来源身份审核助手。只输出一个 JSON 对象，不要 Markdown。
 你会收到已经实际抓取的材料（证据 ID、URL、标题、正文片段、是否属于配置可信域）以及可信来源之间的链接关系。你的任务不是判断内容是否讨喜，而是区分来源身份和内容支持。
 规则：
@@ -156,10 +166,28 @@ REVIEW_SYSTEM_PROMPT = """你是独立的内容验收编辑。只输出一个 JS
 你的任务不是重写稿件，而是比较修改前后的正文、editorial_plan 和 storyboard，判断是否真正满足 owner 的修改要求。
 必须同时看 before 与 after；生成模型自己的 satisfied 声明不可信，也不能作为验收依据。
 不要要求固定正文长度、固定卡片数量、固定布局组合或统一图文比例。允许必要的术语、标题和简短结论在图文间共享；只有整段复述才算重复。
-检查图片布局是否暗示了证据没有说明的顺序/因果；检查图片事实与数字是否有 evidence；检查是否编造个人体验、收益、点赞/收藏/流量。
+检查图片布局是否暗示了证据没有说明的顺序/因果；检查图片事实与数字（含 stat 卡片 stats 数值、quote 署名、timeline 日期）是否有 evidence；检查是否编造个人体验、收益、点赞/收藏/流量。
 如果 owner 指定正文/图片/标题要改而实际没变，satisfied=false。
 输出字段：
 {"satisfied": boolean, "change_summary": "一句话", "problems": ["最多5条"], "remaining_duplication": boolean, "strategy_consistent": boolean, "invented_experience_or_engagement": boolean}
+"""
+
+POLISH_SYSTEM_PROMPT = """你是中文风格润色编辑。只输出一个 JSON 对象，不要 Markdown 代码块。
+你的唯一任务是消除 AI 腔与套话，改善语序、段落长短节奏以及开头/收尾方式，严格遵守输入的 voice 和 issues。
+硬规则（违反任何一条润色结果都会被丢弃）：
+1. 不得新增、删除或改写任何事实、数字、百分比、价格、版本号、日期、专有名词、产品名或来源归属。
+2. 只能修改措辞、语序、断句节奏和开头/收尾表达；禁止把“据报道”改成“官方确认”，禁止把分析写成亲测体验。
+3. 必须保留 evidence_numbers 中出现过的关键数字口径一致，不能换算或编造新数字。
+4. 删掉 issues 指出的套话（如“看到外媒报道”“挺有意思”“最戳我的是”“所以我的判断是”“总的来说”），避免每段长度整齐划一或用总结句升华收尾。
+输出格式：
+{
+  "title": "不超过20字的润色后标题",
+  "caption": ["润色后的正文段落列表"],
+  "storyboard_patch": {
+    "cover": {"headline": "...", "kicker": "...", "subhead": "..."},
+    "cards": [{"index": 0, "headline": "..."}]
+  }
+}
 """
 
 
@@ -169,7 +197,7 @@ AGENT_DECISION_SYSTEM_PROMPT = """你是内容创作 agent 的决策器。每一
 1. 只输出 {"action": "...", "args": {...}, "intent_summary": "...", "expected_result": "...", "referenced_material_ids": [...], "base_version": null}。
 2. 只能选择 payload.tools 中出现的工具；args 必须符合该工具的 schema，不得编造未提供的 material_id、artifact 版本号或 evidence_id。
 3. 没有足够材料时先 search/read_source；没有 artifact 时不要 revise/render/review/submit。
-4. 搜索/读取的 query/url 要围绕 brief 的具体实体、版本、数字和对比维度；避免只换措辞的重复查询。
+4. 搜索/读取的 query/url 要围绕 brief 的具体实体、版本、数字和对比维度；避免只换措辞的重复查询。当选题涉及海外科技公司或人物（如 NVIDIA、OpenAI、Anthropic、Google、Meta、xAI 等）且首轮中文搜索只有简短二手快讯时，下一轮 search 应主动使用英文关键词（如公司英文名 + 人名/产品名 + 核心动作）补充检索一手报道或官方消息。
 5. 发现证据缺口时优先补充最关键的独立来源或官方来源；不要为了凑步骤重复同一动作。
 6. 只有 artifact 完整（标题、正文、图片、claims）且 review 通过后才 submit_for_approval；submit 只创建人工审批，不会发布。
 7. ask_owner 仅用于确实无法从公开信息判断且需要所有者补充时；不要用它代替研究。
@@ -194,7 +222,7 @@ DRAFT_REVIEW_SYSTEM_PROMPT = """你是发布前的独立审稿 agent，不是写
 1. 逐条检查 claims / caption / storyboard 中的事实、数字、版本、日期，是否被所引用的 evidence 原文支持；没有 evidence_id 的 fact 必须判为问题。
 2. 检查来源标签：evidence.source_role=secondary 的报道必须写成“据/媒体称/报道”，不得写成“官方宣布/官方确认”；official/vendor_primary 才可用官方口吻。
 3. 检查标题是否承诺了正文和证据没有支持的内容，是否把旧闻写成今日新闻，是否把分析写成事实。
-4. 检查图片卡片是否出现正文/证据没有的数字、结论或未经说明的顺序/因果。
+4. 检查图片卡片（含 stat 卡片数字、quote 署名来源、timeline 节点日期）是否出现正文/证据没有的数字、结论或未经说明的顺序/因果。
 5. 检查是否编造个人实测、收益、涨粉、点赞/收藏、内部消息或保证效果。
 6. 不要要求固定字数、固定卡片数、固定布局或固定四段式；这些不是事实问题。
 7. 你只能返回下面三种 verdict：
@@ -240,10 +268,10 @@ class FakeLLM:
             # so the normal fail-closed path is exercised without inventing
             # official-looking domains.
             data = {"domains": [], "explanation": "fake model does not suggest live domains"}
-        elif purpose == "research_plan":
-            data = self._research_plan(payload)
         elif purpose == "source_identity":
             data = self._source_identity(payload)
+        elif purpose == "polish":
+            data = self._polish(payload)
         elif purpose == "publication_decide":
             data = {"action": "inspect_task", "args": {}, "intent_summary": "offline inspect", "expected_result": "facts"}
         else:
@@ -260,24 +288,6 @@ class FakeLLM:
             provider=self.provider,
         )
 
-
-    def _research_plan(self, payload: dict) -> dict:
-        base = str(payload.get("query_base") or payload.get("topic") or "").strip()
-        queries: list[str] = []
-        for candidate in (base, f"{base} official", f"{base} release"):
-            candidate = candidate.strip()
-            if candidate and candidate.lower() not in {q.lower() for q in queries}:
-                queries.append(candidate)
-        topic = str(payload.get("topic") or "")
-        versions = sorted(set(__import__("re").findall(r"[A-Za-z][A-Za-z0-9._-]{1,30}[ ]+[0-9]+(?:[.][0-9]+){0,3}", topic)))
-        return {
-            "entities": [],
-            "versions": versions,
-            "claims": [],
-            "source_urls": [str(payload.get("supplied_url") or "")] if payload.get("supplied_url") else [],
-            "queries": queries[:3],
-            "note": "fake deterministic plan",
-        }
 
     def _source_identity(self, payload: dict) -> dict:
         from .sources import host_matches_allowed_domains
@@ -305,6 +315,13 @@ class FakeLLM:
                 }
             )
         return {"sources": sources, "explanation": "fake deterministic source identity"}
+
+    def _polish(self, payload: dict) -> dict:
+        return {
+            "title": str(payload.get("title") or ""),
+            "caption": list(payload.get("caption") or []),
+            "storyboard_patch": {"cover": {}, "cards": []},
+        }
 
     # -- draft ----------------------------------------------------------
     def _draft(self, payload: dict) -> dict:
@@ -602,8 +619,6 @@ class DeepSeekLLM:
             system_prompt = REVIEW_SYSTEM_PROMPT
         elif purpose == "source_review":
             system_prompt = SOURCE_REVIEW_SYSTEM_PROMPT
-        elif purpose == "research_plan":
-            system_prompt = RESEARCH_PLAN_SYSTEM_PROMPT
         elif purpose == "source_identity":
             system_prompt = SOURCE_IDENTITY_SYSTEM_PROMPT
         elif purpose == "draft_review":
@@ -616,17 +631,41 @@ class DeepSeekLLM:
             system_prompt = AGENT_DECISION_SYSTEM_PROMPT
         elif purpose == "publication_decide":
             system_prompt = PUBLICATION_AGENT_SYSTEM_PROMPT
+        elif purpose == "polish":
+            system_prompt = POLISH_SYSTEM_PROMPT
         elif purpose == "draft":
             system_prompt = SYSTEM_PROMPT
         else:
             raise LLMError(f"unsupported purpose {purpose!r}")
+
+        default_temps = {
+            "draft": 0.85,
+            "revise": 0.8,
+            "polish": 0.9,
+            "review_revision": 0.2,
+            "draft_review": 0.2,
+            "source_identity": 0.2,
+            "source_review": 0.2,
+        }
+        purposes_cfg = self.config.get("llm.purposes", {}) if hasattr(self.config, "get") else {}
+        purpose_cfg = purposes_cfg.get(purpose, {}) if isinstance(purposes_cfg, dict) else {}
+        if not isinstance(purpose_cfg, dict):
+            purpose_cfg = {}
+        call_model = str(purpose_cfg.get("model") or self.model)
+        if "temperature" in purpose_cfg and purpose_cfg["temperature"] is not None:
+            call_temp = float(purpose_cfg["temperature"])
+        elif purpose in default_temps:
+            call_temp = float(default_temps[purpose])
+        else:
+            call_temp = float(self.config.get("llm.temperature", 0.5))
+
         body = {
-            "model": self.model,
+            "model": call_model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": float(self.config.get("llm.temperature", 0.5)),
+            "temperature": call_temp,
             "max_tokens": max_output_tokens,
             "response_format": {"type": "json_object"},
             "stream": False,
@@ -643,6 +682,7 @@ class DeepSeekLLM:
 
         attempts = int(self.config.get("llm.max_retries", 2)) + 1
         last_error: Exception | None = None
+        json_retry_used = False
         for attempt in range(attempts):
             started = time.monotonic()
             if before_attempt is not None:
@@ -655,7 +695,7 @@ class DeepSeekLLM:
             reservation_id = self.budget.reserve(
                 estimated_usd,
                 provider=self.provider,
-                model=self.model,
+                model=call_model,
                 purpose=purpose,
                 ref=f"attempt:{attempt + 1}",
             )
@@ -708,7 +748,28 @@ class DeepSeekLLM:
                 ok=True,
             )
             content = _extract_content(response)
-            data = _parse_json(content)
+            try:
+                data = _parse_json(content)
+            except LLMOutputError as exc:
+                # A syntactically broken JSON object is a paid, transient
+                # writer failure.  Retry it once inside the same bounded
+                # attempt loop; the next iteration reserves a fresh budget
+                # slot and calls before_attempt() again.  Truncation is not
+                # retried here: it needs a larger output cap, not a re-roll.
+                last_error = exc
+                if (
+                    not json_retry_used
+                    and "invalid JSON" in str(exc)
+                    and attempt + 1 < attempts
+                ):
+                    json_retry_used = True
+                    body["messages"][-1]["content"] += (
+                        "\n\n上一次响应不是完整合法的 JSON（解析失败）。"
+                        "请只重新输出一个完整、语法正确的 JSON 对象，"
+                        "不要输出 Markdown 代码块或额外说明。"
+                    )
+                    continue
+                raise
             refusal = _model_refusal_reason(data, secret=key)
             if refusal is not None:
                 # The paid response is already settled above.  A structured
@@ -1102,12 +1163,19 @@ def _storyboard_for(
     }.get(mode, "编辑")
     cover = {
         "layout": "cover",
+        "variant": "headline",
         "headline": _shorten(title, 40),
         "kicker": kicker,
         "subhead": _shorten(quotes[0], 50),
         "note": "",
         "evidence_ids": list(evidence_ids),
     }
+    pct_match = re.search(r"(\d+(?:\.\d+)?)%", quotes[0]) if quotes else None
+    if mode == "simple" and pct_match:
+        cover["variant"] = "stat"
+        cover["stats"] = [
+            {"value": pct_match.group(1), "unit": "%", "label": "来源关键指标"}
+        ]
     cards: list[dict] = []
     if mode != "simple":
         headline = {

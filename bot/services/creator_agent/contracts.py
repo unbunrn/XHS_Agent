@@ -40,6 +40,7 @@ class CreativeBrief:
     base_artifact_version: int | None = None
     parent_run_key: str | None = None
     generation: int = 1
+    feedback_message_id: str = ""
     created_at: str = field(default_factory=_now)
 
     def as_dict(self) -> dict[str, Any]:
@@ -56,6 +57,7 @@ class CreativeBrief:
             "base_artifact_version": self.base_artifact_version,
             "parent_run_key": self.parent_run_key,
             "generation": int(self.generation),
+            "feedback_message_id": self.feedback_message_id,
             "created_at": self.created_at,
         }
 

@@ -17,6 +17,8 @@ env/
 
 # Runtime state, databases, exports, logs, PID/identity files
 var/
+var/gallery/
+assets/fonts/
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm

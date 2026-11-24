@@ -191,5 +191,82 @@ class RenderTests(unittest.TestCase):
             cleanup(env)
 
 
+class RenderFallbackAndLayoutsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        import shutil
+        import tempfile
+        from pathlib import Path
+
+        from tests.helpers import make_config
+
+        self._shutil = shutil
+        self.tmp = Path(tempfile.mkdtemp(prefix="xhs-render-ext-"))
+        self.cfg = make_config(self.tmp)
+        self.cfg.data["render"]["engine"] = "pillow"
+        self.cfg.data["render"]["max_cards"] = 6
+
+    def tearDown(self) -> None:
+        self._shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _six_layout_content(self):
+        from bot.content import DraftContent
+
+        return DraftContent.from_dict(
+            {
+                "title": "六个新版式全覆盖",
+                "caption": ["正文说明。"],
+                "tags": ["测试"],
+                "storyboard": {
+                    "cover": {"layout": "cover", "kicker": "实测汇总", "headline": "关键变化", "subhead": "六个板块"},
+                    "cards": [
+                        {"layout": "stat", "headline": "核心数字", "stats": [{"value": "98%", "unit": "置信", "label": "作者估算"}]},
+                        {"layout": "quote", "headline": "原话摘录", "subhead": "没有人真正读完之前，证明还不算完成。", "attribution": "James Maynard"},
+                        {"layout": "timeline", "headline": "关键节点", "points": ["03月 公布初步进展", "04月 完整仓库开源"]},
+                        {"layout": "checklist", "headline": "谁该跟进", "columns": [{"label": "建议试", "text": "做代码审计的研究团队"}, {"label": "可跳过", "text": "日常办公写作场景"}]},
+                        {"layout": "qa", "headline": "常见疑问", "points": ["普通人能跑吗？｜需要本地 16GB 显存起步"]},
+                    ],
+                },
+                "claims": [{"type": "fact", "text": "包含 98% 与 16GB 参数。", "evidence_ids": ["E1"], "core": True}],
+            }
+        )
+
+    def test_a9_pillow_engine_renders_all_new_layouts_and_footer_modes(self) -> None:
+        content = self._six_layout_content()
+        for mode in ("last", "every", "none"):
+            self.cfg.data["render"]["footer_disclaimer"] = mode
+            imgs = render_draft(
+                content,
+                out_dir=self.tmp / f"out-{mode}",
+                config=self.cfg,
+                draft_key=f"pillow-{mode}",
+            )
+            self.assertEqual(len(imgs), 6)
+            for img in imgs:
+                self.assertEqual((img.width, img.height), (1080, 1440))
+                self.assertTrue(img.path.is_file())
+
+    def test_a10_browser_launch_error_fallback_vs_none_and_overflow(self) -> None:
+        from unittest.mock import patch
+        from bot.visual.engine import BrowserLaunchError
+
+        content = self._six_layout_content()
+        self.cfg.data["render"]["engine"] = "html"
+        self.cfg.data["render"]["fallback_engine"] = "pillow"
+
+        with patch("bot.visual.engine.render_storyboard_html", side_effect=BrowserLaunchError("no edge")):
+            imgs = render_draft(content, out_dir=self.tmp / "fb", config=self.cfg, draft_key="fb")
+        self.assertEqual(len(imgs), 6)
+
+        self.cfg.data["render"]["fallback_engine"] = "none"
+        with patch("bot.visual.engine.render_storyboard_html", side_effect=BrowserLaunchError("no edge")):
+            with self.assertRaises(BrowserLaunchError):
+                render_draft(content, out_dir=self.tmp / "fb-off", config=self.cfg, draft_key="fb-off")
+
+        self.cfg.data["render"]["fallback_engine"] = "pillow"
+        with patch("bot.visual.engine.render_storyboard_html", side_effect=RenderError("card 2: slot overflows")):
+            with self.assertRaises(RenderError):
+                render_draft(content, out_dir=self.tmp / "overflow", config=self.cfg, draft_key="overflow")
+
+
 if __name__ == "__main__":
     unittest.main()

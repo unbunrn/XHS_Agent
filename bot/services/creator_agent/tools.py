@@ -105,11 +105,15 @@ def register_tools(registry, runtime: Any) -> None:
         return ToolResult(ok=True, data={"artifact": artifact.as_dict()}, artifact=artifact)
 
     def render(args, context):
-        artifact = _runtime(context).render_images(
-            brief=context.brief,
-            artifact=context.latest_artifact(),
-            layouts=list(args.get("layouts") or []),
-        )
+        theme = str(args.get("theme") or "").strip() or None
+        kwargs = {
+            "brief": context.brief,
+            "artifact": context.latest_artifact(),
+            "layouts": list(args.get("layouts") or []),
+        }
+        if theme:
+            kwargs["theme"] = theme
+        artifact = _runtime(context).render_images(**kwargs)
         return ToolResult(ok=True, data={"artifact": artifact.as_dict()}, artifact=artifact)
 
     def inspect(args, context):
@@ -193,7 +197,7 @@ def register_tools(registry, runtime: Any) -> None:
         ToolSpec(
             "revise_artifact",
             "Create a new artifact version from a revision plan.",
-            _obj({"instruction": {"type": "string"}, "revision_plan": {"type": "object"}, "material_ids": {"type": "array"}}),
+            _obj({"instruction": {"type": "string"}, "revision_plan": {"type": "object"}, "material_ids": {"type": "array"}, "base_version": {"type": "integer"}}),
             revise,
             side_effect=True,
             cost="model",
@@ -201,8 +205,8 @@ def register_tools(registry, runtime: Any) -> None:
         ),
         ToolSpec(
             "render_images",
-            "Render image cards from the latest artifact.",
-            _obj({"layouts": {"type": "array"}}),
+            "Render image cards from the latest artifact. Pass optional theme (editorial|swiss|terminal|newsprint|notebook|poster) when inspect_layout flags cover similarity.",
+            _obj({"layouts": {"type": "array"}, "theme": {"type": "string"}}),
             render,
             side_effect=True,
             cost="local",

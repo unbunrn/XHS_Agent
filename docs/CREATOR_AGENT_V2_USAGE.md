@@ -95,3 +95,31 @@ daily_discovery_feed_limit = 50
 - `semantic_review=false` 时只有确定性 claim/quote/number 检查；打开后才会额外调用一次独立模型审稿；该调用已在 provider 调用前计入 creator_agent 的模型预算。
 - Migration 9 已在 live DB 执行；回滚只能恢复备份，不能删除历史迁移。
 - 旧固定选题路径已物理删除；`research_plan`/`topic_research`/`adaptive_research` 等历史模块保留为只读/回退代码，不再驱动新选题。V2 没有删除历史迁移或生产数据。
+
+
+## 视觉主题与文风配置（V2 视觉与文案升级）
+
+### 1. HTML/CSS 本地视觉引擎与 6 套主题
+
+- **主渲染引擎**：默认使用 `render.engine = "html"`，通过 Playwright 驱动本机已安装的 Microsoft Edge（`render.browser_channel = "msedge"`）将 12 种版式（`cover`, `comparison`, `process`, `keypoints`, `diagram`, `argument`, `annotated`, `stat`, `quote`, `timeline`, `checklist`, `qa`）和 5 种封面变体渲染为 `1080×1440` PNG。
+- **6 套视觉主题**：`editorial`（杂志社论）、`swiss`（瑞士网格）、`terminal`（技术终端）、`newsprint`（铅印简报）、`notebook`（手账笔记）、`poster`（高反差海报），按近期冷却窗（`render.theme_cooldown = 2`）与版式偏好自动轮换并配对双色方案。
+- **单篇主题覆盖**：若 `inspect_layout` 提示封面 `dHash` 与近期已提交作品过于接近（汉明距离 `< render.cover_min_distance`），Agent 可通过 `render_images(theme="...")` 指定其他主题重渲。
+- **离线字体与无浏览回退**：运行 `powershell -ExecutionPolicy Bypass -File scripts/fetch_fonts.ps1` 可将精选字体下载至 `assets/fonts/`；若本机无法启动 Edge（抛出 `BrowserLaunchError`）且 `render.fallback_engine = "pillow"`，会自动回退到纯 Python Pillow 渲染（排版超限触发 `RenderError` 时不会静默回退或截断）。
+
+### 2. 人设表达与去 AI 腔护栏
+
+- **人设配置**：在 `config/voice.toml`（由 `writer.voice_path` 指定）维护第一人称口径、读者对象、语气规则、开头/结尾招式与正反例句；生成提示词按 `run_key` 确定性抽样并注入近期作品的 `avoid_recent`（近 8 篇开头、标题、封面文案与近 3 篇主题）。
+- **AI 腔体检与单轮润色**：草稿经事实校验并剥离报告套话后，由 `bot/style_lint.py` 评估 12 条去 AI 腔及跨篇重复规则；得分高于阈值且启用 `writer.style_polish = true` 时执行至多 1 轮 `purpose = "polish"` 润色，并在润色后强制重跑 `validate_draft_payload(..., repair_caption_claims=False)`——若新增未证实数字或改变卡片数量，立即回滚到润色前草稿并记录至 `uncertainties`。
+- **分用途温度**：在 `[llm.purposes.*]` 可按用途配置独立温度（例如 `draft = 0.85`、`revise = 0.8`、`polish = 0.9`、`review` / `draft_review` / `visual_review = 0.2`）。
+
+### 3. 视觉画廊与人工对比抽检
+
+使用本机 Edge 离线渲染 6 套主题的对比图卡并输出接触印相拼图与 §7.2 指标报告：
+
+```powershell
+$env:PLAYWRIGHT_NODEJS_PATH="D:\Dev\Tools\node-v22.23.2-win-x64\node.exe"
+$env:PYTHONPATH=".;.venv\Lib\site-packages"
+python -B scripts/render_gallery.py --strict
+```
+
+产物输出在 `var/gallery/<theme>/` 及总览拼图 `var/gallery/contact.png`。

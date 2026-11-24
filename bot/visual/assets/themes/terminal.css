@@ -1,0 +1,79 @@
+/* Theme: Terminal (暗色科技) */
+body.theme-terminal {
+  --font-display: "BotDisplay", "BotBody", sans-serif;
+  --font-body: "BotBody", sans-serif;
+  --font-mono: "BotMono", monospace;
+  --radius: 24px;
+}
+
+body.theme-terminal::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 72px 72px;
+  z-index: 1;
+}
+
+body.theme-terminal::after {
+  content: "";
+  position: absolute;
+  width: 960px;
+  height: 960px;
+  right: var(--glow-x, -260px);
+  top: var(--glow-y, -220px);
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--glow, rgba(91, 140, 255, 0.42)), transparent 65%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+body.theme-terminal .folio {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  padding-bottom: 18px;
+}
+
+body.theme-terminal .kicker {
+  align-self: flex-start;
+  padding: 10px 22px;
+  border: 1.5px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 24px;
+}
+
+body.theme-terminal .cover-headline {
+  line-height: 1.28;
+}
+
+body.theme-terminal .cover-subcard,
+body.theme-terminal .list-card,
+body.theme-terminal .col-panel,
+body.theme-terminal .stat-card,
+body.theme-terminal .quote-stage,
+body.theme-terminal .qa-item,
+body.theme-terminal .timeline-item,
+body.theme-terminal .excerpt-box,
+body.theme-terminal .cover-stat-item,
+body.theme-terminal .cover-split-box {
+  background: var(--surface, rgba(255, 255, 255, 0.06));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(8px);
+}
+
+body.theme-terminal mark {
+  background: linear-gradient(90deg, var(--accent), var(--accent2, #c18cff));
+  -webkit-background-clip: text;
+  color: transparent;
+  padding: 0 2px;
+}
+
+body.theme-terminal .list-badge {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--accent);
+}

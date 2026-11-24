@@ -143,6 +143,14 @@ def main(argv: list[str] | None = None) -> int:
     # 强制子进程用 UTF-8 输出并且不缓冲，避免中文日志在 Windows 上乱码/延迟。
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("PYTHONUNBUFFERED", "1")
+    local_tmp = root / "var" / "tmp"
+    local_tmp.mkdir(parents=True, exist_ok=True)
+    env["TEMP"] = str(local_tmp)
+    env["TMP"] = str(local_tmp)
+    env["TMPDIR"] = str(local_tmp)
+    node_exe = Path(r"D:\Dev\Tools\node-v22.23.2-win-x64\node.exe")
+    if "PLAYWRIGHT_NODEJS_PATH" not in env and node_exe.is_file():
+        env["PLAYWRIGHT_NODEJS_PATH"] = str(node_exe)
 
     # Prefer an absolute executable path in the identity record.  This is what
     # stop.ps1 compares against the live process image before killing anything.

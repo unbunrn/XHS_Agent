@@ -1,135 +1,162 @@
-# AI 工具观察 · 本地运营机器人
+# 小红书运营智能体
 
-一个面向“小红书 AI 工具实用内容”的本地运营闭环：抓取来源、去重/聚类、生成草稿与 PNG 卡片、人工审批、受控发布、失败恢复。默认离线运行，不需要外部账号。
+在飞书提出选题、阅读图文、给修改意见和批准发布。创作 Agent 负责取材与迭代作品，发布 Agent 跟进获批版本的提交、结果确认和故障恢复。
 
-> 安全边界：默认使用 mock 发布，只写本地 `simulated` 导出，**不会**声称已真实发帖。真实发布需要四道开关同时满足，并且必须由账号本人在飞书私聊或本地控制台明确批准某一版最终正文和图片。
+这是基于 DeepSeek API 的大模型应用项目：模型选择行动，Python 工具执行操作，SQLite 保存进度，人决定是否发布。开发工具 DeepSeek Harness（DSH）不是机器人运行时的必需服务。
 
-## 快速开始
+## 日常使用
 
-要求：Windows + Python 3.12。建议先创建普通 venv 并安装固定依赖（不使用 `--system-site-packages`）：
+1. 私聊飞书机器人：**选题 AI 智能体为什么需要记忆，用一个生活例子解释，少用术语。**
+2. 收到正文和配图后给意见：**修改 开头改成我的观点，图片只展示机制和例子，保留第二张图。**
+3. 满意后发送 **批准 XH-XXXXXX**，允许对应版本真实发布。
+4. 等待结果；需要登录或人工判断时，机器人会说明下一步。结果未知时先查平台，不直接重复发帖。
 
-```powershell
-cd D:\Dev\Projects\bot
+请用实际审批码替换示例编号。普通修改指令默认针对最近一篇可修改作品，多篇并行时先核对对象。定时选题也只生成待审批作品。电脑需要保持开机、不休眠，后台才能持续处理。
+
+## 系统怎么工作
+
+~~~mermaid
+flowchart TD
+    A[飞书选题或修改] --> Q[SQLite 任务队列]
+    B[定时发现热点] --> Q
+    Q --> W[Worker]
+    W --> C[创作 Agent]
+    C --> T[搜索阅读 / 写稿修改 / 渲染检查]
+    T --> C
+    C --> R[本人审批具体版本]
+    R -->|修改| Q
+    R -->|批准| P[发布 Agent]
+    P --> G[批准版本、账号、图片与配额校验]
+    G --> H[HTTP 适配器 → 小红书桥接]
+    H --> E[保存发送记录 / 未知结果对账]
+    E --> N[飞书回执或请求主人处理]
+~~~
+
+两个 Agent 是不同职责的模型工具循环，不需要两个模型部署。每轮模型读取目标和观察，选择一个工具，程序校验、执行并保存结果，再进入下一轮。
+
+- **创作 Agent**：发现选题、搜索、阅读来源、写稿、按意见修改、渲染图片、审阅、请求补充、提交审批。内部产物与正式审批分开。
+- **发布 Agent**：只处理获批版本，选择检查、恢复原图、提交、查询结果或请求主人处理。发布权限与批准边界由程序守住。
+- **确定性程序**：处理消息去重、计时重试、状态回复和平台证据核验。自动对账无需每次询问模型。
+
+本地运行三个服务：gateway 接收飞书长连接事件；worker 执行任务和发送通知；console 提供本地审批与维护页面。SQLite 保存任务、作品版本、审批、发送尝试和通知，图片等文件保存在本机目录。
+
+## 技术栈与平台接入
+
+- Python 3.12；固定依赖见 [requirements.txt](requirements.txt)。
+- DeepSeek API：结构化行动决策、正文生成与修改；审稿同时有程序检查，是否额外调用独立语义审稿取决于配置。
+- SQLite：本机持久队列、检查点和业务记录。
+- Pillow：图片渲染与程序化布局检查，不等同于扩散模型生图。
+- lark-oapi：飞书机器人接入。
+- 社区小红书桥接：应用通过自己的 HTTP 适配器调用所需能力，没有把桥接的所有 MCP 工具开放给模型。
+
+## 快速开始：离线体验
+
+在 Windows PowerShell 中进入仓库目录，需要已安装 Python 3.12。
+
+~~~powershell
 .\setup-bot.cmd
-# 离线只想验证 venv：.\setup-bot.cmd -SkipInstall
-# 若当前 .venv 是 DSH 的 --system-site-packages 运行时，需要重建：
-# .\setup-bot.cmd -Recreate
-```
+.\.venv\Scripts\python.exe -m bot demo
+~~~
 
-`requirements.txt` 固定了 Pillow 与 lark-oapi。`.gitignore` 已排除 `.venv*`、`config/bot.toml`、`config/secrets.toml`、`var/`、缓存和 `.env`。
+安装脚本创建虚拟环境并安装依赖。基础 demo 使用本地来源、fake 模型和 mock 发布，输出到 var/demo，结果标记为 simulated，不是真实平台发布。它保留早期基础流水线，用于理解采集、生成、审批和持久化；不是新版双 Agent 的完整演示。
 
-```powershell
-$env:PYTHONPATH="."
-.venv\Scripts\python.exe -m bot --config config/bot.toml demo
-```
+新版发布与故障恢复可用离线集成测试体验：
 
-演示会依次完成：
+~~~powershell
+.\.venv\Scripts\python.exe -B -m unittest tests.test_publication_round2_demo
+.\.venv\Scripts\python.exe -B -m unittest tests.test_publication_silence_fix
+~~~
 
-1. 读取两个本地 fixture 来源；
-2. 去重、聚类、评分并选出 3 个选题；
-3. 用 fake LLM 生成 1 篇草稿；
-4. 渲染 2 张 1080×1440 PNG；
-5. 生成本地审批通知；
-6. 重启后确认待审批仍在；
-7. 批准后通过 mock 发布，结果为 `simulated`（无外部帖子 ID/URL）；
-8. 再次重启，确认仍然只有 1 次发布尝试。
+这些测试使用模拟外部平台、模型或通知器，验证实际 SQLite 和执行链，不需要真实发帖。
 
-产物在 `var/demo/`，不会发送到飞书或小红书。
+## 配置真实账号
 
-## 本地审批控制台
+1. 参考 [配置模板](config/bot.example.toml) 创建本机配置，例如 config/bot.live.toml。模板面向真实运行，不要当作离线配置直接启用。
+2. 按 [飞书指南](docs/FEISHU_SETUP.md) 配置机器人、本人标识与消息事件。
+3. 按 [桥接指南](docs/XHS_BRIDGE_SETUP.md) 和 [容器方案](docs/XHS_CONTAINER_PLAN.md) 配置本机桥接、认证、图片映射和扫码登录。
+4. 配置 DeepSeek、来源和通知。检查数据库兼容与创作/发布开关，再启动服务。
+5. 用一篇新批准的作品确认平台笔记和手机回执，再扩大使用。
 
-```powershell
-# 终端 1：本地控制台（仅 127.0.0.1）
-.venv\Scripts\python.exe -m bot --config config/bot.toml console
+真实发布需要 live 模式、xiaohongshu provider、live_enabled、真实来源与模型、运行环境授权，以及本人对最终版本的批准。仅打开 publication_agent 不能替代这些条件。
 
-# 终端 2：工作进程
-.venv\Scripts\python.exe -m bot --config config/bot.toml worker
-```
+密钥只放本机环境变量或 config/secrets.toml。真实配置、数据库、图片产物、日志和虚拟环境由 .gitignore 排除，不上传仓库。
 
-打开 `http://127.0.0.1:8765`。未设置 `BOT_CONSOLE_TOKEN` 时，首次启动会在终端打印一次性登录口令。控制台登录使用 HttpOnly cookie + CSRF，GET 只读，所有决定走 POST。
+## 启动与维护
 
-也可以用 `start-bot.cmd` / `health-check.cmd` / `stop-bot.cmd` 管理隐藏后台进程。当 `notify.provider=lark` 且应用凭据与 owner 已配置时，默认启动会额外拉起第三个隐藏的飞书长连接网关；`start/stop/health` 对它使用与 worker/console 相同的 PID + 身份核对。首次请在普通 Windows 桌面会话中验证 `var\logs` 和 `var\run`。
+已有配置的本机实例可以使用现有脚本：
 
-## 常用命令
+~~~powershell
+.\scripts\start.ps1 -Config config/bot.live.toml -AllowRealPublishDaemon
+.\scripts\stop.ps1
+~~~
 
-```powershell
-$py = ".venv\Scripts\python.exe"
-& $py -m bot --config config/bot.toml doctor
-& $py -m bot --config config/bot.toml status
-& $py -m bot --config config/bot.toml tick
-& $py -m bot --config config/bot.toml backup --output var/backups/bot.sqlite3
-& $py -m bot --config config/bot.toml approve XH-XXXXXX
-& $py -m bot --config config/bot.toml reconcile XH-XXXXXX confirmed_published --post-id ... --url ...
-```
+启动支持 -GatewayOnly、-WorkerOnly、-ConsoleOnly；停止支持 -Name gateway、worker 或 console。脚本核验进程身份，避免误停其他 Python 程序。
 
-`publish-due` 仍经过完整发布闸门；它不会绕过审批。
+本地控制台默认地址为 http://127.0.0.1:8765，以配置为准，访问需要登录。电脑休眠或关闭时后台不能继续工作。
 
-## 测试
+**doctor 会调用数据库初始化，可能应用迁移，不能当成严格只读查询。** 迁移前停止写入、备份并验证副本。有新增审批或发送后，不要用旧库覆盖；见 [回滚说明](docs/delivery/PUBLICATION_AGENT_ROLLBACK.md)。服务更新时不要中断正在提交的发布任务。
 
-```powershell
-$env:PYTHONPATH="."
-$env:PYTHONIOENCODING="utf-8"
-.venv\Scripts\python.exe -m unittest discover -s tests -v
-```
+## 飞书命令速查
 
-当前 174 个测试全部通过，覆盖审批绑定、异步修改队列、重复回调、并发抢占、事务内配额复检、重启恢复、`publish_unknown`、SSRF、RSS 条件请求、DeepSeek Search/Fetch 预算与来源限制、预算预留/结算、XHS `redId` 身份、飞书通知完整性、live 拒绝 fixture/fake 内容、PNG 布局/分页/预览一致、控制台鉴权、依赖元数据、网关生命周期和进程身份。另有 `tests/test_process_ownership.ps1` 验证后台进程所有权。
+只接受绑定的本人私聊。随时发送 **帮助 / 菜单 / help** 查看完整说明。帮助和发布状态回复不消耗模型调用。
 
-新增覆盖：定时采集跳过已结束（或失败）委托选题遗留的 `deepseek-search://topic/...` 动态来源；单个来源的适配器构造失败只记录该来源错误，不再中断整轮采集；模型仅对当前选题一次性建议官方域名（`[topics] model_source_review`，默认关闭），建议不会写入长期可信源，审批消息会明确标注“来源范围说明”。
+**创作与审批**
 
-## 配置与真实账号
+- 选题 <主题或链接> / 写一篇 <要求>：开始创作。
+- 修改 <具体意见>：修改最近一篇可修改作品，收到新版后再审阅。
+- 批准 XH-XXXXXX：同意真实发布具体版本。
+- 拒绝 XH-XXXXXX：拒绝该审批。
 
-- 离线演示：`config/bot.toml`（fixture 来源、fake LLM、mock 发布）。
-- live 示例：`config/bot.example.toml`。复制后填账号，但不要直接打开真实发布。
-- 密钥只放环境变量或本地 `config/secrets.toml`（不要提交）：
-  - `DEEPSEEK_API_KEY`
-  - `LARK_APP_ID` / `LARK_APP_SECRET` / `LARK_OWNER_OPEN_ID`
-  - `XHS_MCP_AUTH_TOKEN` 或 `XHS_AUTH_TOKEN`
-  - 可选 `BOT_CONSOLE_TOKEN`
-- 可选 `[topics] model_source_review = true`：当配置的可信域名没有命中时，模型可为**当前这一条**委托选题建议最多 3 个官方域名；代码会校验并只用于本次补充搜索，不会写入长期可信源，也不会自动扩张以后选题的权限。审批消息会显示“来源范围说明”。默认关闭；live 配置已显式开启。
-- 小红书真实发布还要求 `publisher.xiaohongshu.expected_red_id`（或环境变量 `XHS_EXPECTED_RED_ID`）等于桥接 `/api/v1/user/me` 的 `data.data.userBasicInfo.redId`。这是公开账号号，不是不可变内部 `user_id`；`xhs-main` 这类本地别名不算。发布前会先检查登录状态和当前账号身份，不匹配/无法解析/只有猜测字段时会在 POST 前拒绝；文档中只有 `status`、没有 note id/URL 的发布回执仍保持 `publish_unknown`。
+**发布与恢复**
 
-真实发布必须同时满足：`mode=live`、`publisher.provider=xiaohongshu`、`publisher.live_enabled=true`、`BOT_ALLOW_REAL_PUBLISH=1`，且不是 fixture/fake 演示管线；然后还需要对具体最终版本的一次 owner 批准。缺少任何一项都不会真实发布。飞书手机批准只有在审批通知的最终正文和**全部图片**都确认送达后才生效；未完整送达会显示错误并重试。本地控制台是独立的受认证路径。
+- 发布状态 XH-XXXXXX：查看进度、提交情况和下一步。
+- 检查原因 XH-XXXXXX：只读诊断，不触发重新发布。
+- 修复并重试 XH-XXXXXX：继续处理；未知结果先查原发送。
+- 已登录 XH-XXXXXX：扫码完成后接续指定作品，并重新核验账号。编号标识作品，不是登录凭据。
+- 暂停发布 XH-XXXXXX / 继续发布 XH-XXXXXX：暂停或恢复任务。
+- 取消发布 XH-XXXXXX：停止后续提交，不能撤回已在途或已发布的帖子。
+- 确认未发布并重试 XH-XXXXXX：仅在本人核实平台确实没有发布后使用；在途请求仍受限制。
 
-飞书审批命令：
+## 如何处理失败和重启
 
-```text
-批准 XH-XXXXXX
-拒绝 XH-XXXXXX
-修改 XH-XXXXXX 你的修改意见
-```
+业务任务与发送尝试分开保存。“把这篇发出去”是一项任务，真正向平台提交一次是一条发送记录，查询结果不算再次提交。
 
-只接受本人（owner open_id）的私聊；群聊、非本人、超时或未回复都不会发布。修改正文/图片/账号/计划时间会使审批失效。飞书/CLI 的“修改”只写入持久 `revise` 队列并立即返回结果，由 worker 在后台调用模型生成新版本；新版本会重新发起审批，不会沿用旧批准。
+批准绑定具体版本和图片。缺图时只能恢复已批准的相同字节，不能偷偷重画。超时或缺少可信回执时保留 unknown，自动安排有限次数的只读核对；依据目标账号和属于本次发送的证据确认结果，仍无法确认时通知主人。
 
-## 备份与恢复
+模型步骤耗尽、预算不足或重复检查无进展时，保存状态并发送停止说明。飞书状态查询直接读库回复。通知失败时补通知，不重新发作品。持久化和对账降低重复风险，但不宣称外部平台具有分布式“恰好一次”保证。
 
-```powershell
-.\backup-bot.cmd
+## 代码导航
 
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restore.ps1 `
-  -Backup var\backups\bot-YYYYMMDD-HHMMSS.sqlite3 -Config config/bot.toml -Force
-```
+~~~text
+bot/
+  lark_gateway.py              飞书入站
+  worker.py / jobs.py           后台执行与持久队列
+  services/
+    creator_agent/             创作决策、工具、版本与检查点
+    publication_agent/         发布决策、诊断、恢复与对账
+    approvals.py               审批和飞书命令
+    publish.py                 发布校验与发送记录
+    notifications.py           持久通知和发送
+  adapters/                    模型、来源、通知、小红书接口
+  schema.py / db.py             数据结构与数据库访问
+scripts/                       安装、启停、备份与演示
+tests/                         单元及集成回归
+docs/                          架构、使用、交付与历史设计
+config/bot.example.toml         无密钥配置模板
+~~~
 
-恢复会先停本地服务、校验备份、保留当前数据库副本，再恢复并运行 `doctor`。不要覆盖正在发布中的库。
+初学者先读 [架构学习指南](docs/PROJECT_ARCHITECTURE_WALKTHROUGH.md)，再沿“一条飞书消息 → 入队 → 模型选择工具 → 审批 → 发布记录”追代码。这个项目属于大模型应用工程，不是自行训练或微调模型。
 
-## 项目结构
+## 验证记录与边界
 
-```
-bot/                 核心代码（worker、console、审批/发布服务、适配器）
-config/              离线配置与 live 示例
-fixtures/            离线演示来源
-tests/               174 个自动化测试 + 进程所有权 PowerShell 回归
-scripts/             Windows 启动/停止/健康检查/备份/恢复/setup 脚本
-docs/                需求、调研、复核记录与本实现状态
-```
+截至 2026-11-19，现有本机实例的新版发布 Agent 已有真实成功发布记录。随后修复的“停止无通知、发布状态无回复”已有离线回归，独立复跑 18 项通过，线上状态回复也已有发送记录。见 [静默修复交付](docs/delivery/PUBLICATION_SILENCE_FIX.md)：该报告记录全量 374 项通过。这是当次交付记录，不代表后续修改自动通过测试。
 
-实现状态、外部待配置项和真实验证结果见 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)。
+正常发布成功不代表所有异常都已做过真机验证。故障恢复主要由模拟平台测试覆盖；自然语言无编号定位、多作品消歧、真实视觉审图、评论互动和完整运营指标分析不属于已验收能力。内容质量仍需要本人阅读和判断。
 
-## 当前未完成/未验证
+~~~powershell
+# 修改后先做相关定向回归，必要时运行全量
+$env:PYTHONIOENCODING = "utf-8"
+.\.venv\Scripts\python.exe -B -m unittest discover -s tests -v
+~~~
 
-- 真实 RSS、DeepSeek、飞书、小红书桥受本机网络和凭据限制，尚未端到端验证；`doctor` 会明确报告缺失项，不会报告为已连接。本轮没有运行付费模型请求。
-- 小红书 `/api/v1/user/me` 的实际响应字段未能在本会话核对（GitHub/DNS 被阻止）；实现只接受明确 ID 字段，无法解析就拒绝发布。请在正常网络对照官方 `docs/API.md` 确认。
-- 飞书按钮审批未实现，使用文本命令；手机批准要求通知正文和全部图片已完整送达。
-- 评论读取/自动回复、平台指标抓取未接入；不伪造指标。
-- 本沙箱拒绝 `Win32_Process` CIM 查询，`stop.ps1` 因此按设计 fail closed；普通 Windows 会话可完成真实停止验证。新 venv 的 `ensurepip` 也受沙箱临时目录权限限制，依赖安装需在正常会话执行。
-- 发布事务只保证同一 SQLite 数据库内串行化，不是分布式 exactly-once；预算预留是估算，不是硬性货币上限。
-- 没有真实发帖、评论、私信，也没有 Git 提交/推送。
+深入阅读：[创作架构](docs/CREATOR_AGENT_V2_ARCHITECTURE.md)、[发布架构](docs/PUBLICATION_AGENT_ARCHITECTURE.md)、[发布恢复交付](docs/delivery/PUBLICATION_AGENT_ROUND2_DELIVERY.md)。历史文档中的“未部署”、测试数量和 PID 属于当时记录，不能覆盖当前运行事实。

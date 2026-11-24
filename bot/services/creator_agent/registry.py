@@ -87,7 +87,20 @@ class ToolRegistry:
         except ToolError:
             raise
         except Exception as exc:
-            return ToolResult(ok=False, error=f"{type(exc).__name__}: {exc}"[:500])
+            data: dict[str, Any] = {}
+            issues = getattr(exc, "issues", None)
+            if issues:
+                data["issues"] = issues
+            candidate = getattr(exc, "candidate", None)
+            if candidate:
+                # The runner persists this so the model can make one targeted
+                # repair instead of guessing from a single English string.
+                data["candidate"] = candidate
+            return ToolResult(
+                ok=False,
+                error=f"{type(exc).__name__}: {exc}"[:500],
+                data=data,
+            )
         if isinstance(result, ToolResult):
             return result
         if isinstance(result, dict):

@@ -9,7 +9,7 @@
 >
 > **2026-11-18 补充返修**：按 handoff 又修了“诊断派生 job 变成正常发布 job”和“重启对账把账号里旧同标题笔记当成新成功”两个反例，并给每次发送增加预发送账号/feed 基线。新增报告见 [`PUBLICATION_AGENT_HANDOFF_DELIVERY.md`](PUBLICATION_AGENT_HANDOFF_DELIVERY.md)；最新定向 **71/71**、主全量 **333/333** 通过。旧 64/326 数字保留为上一轮证据。
 >
-> **2026-11-18 Round-2**：又修复“identity 缺失仍按旧同标题认领”和“检查原因改变 paused/waiting_owner 发布决定”，新增身份+列表同源核验、严格预发送基线、诊断只读及完整离线演示。最新报告见 [`PUBLICATION_AGENT_ROUND2_DELIVERY.md`](PUBLICATION_AGENT_ROUND2_DELIVERY.md)，回滚见 [`PUBLICATION_AGENT_ROLLBACK.md`](PUBLICATION_AGENT_ROLLBACK.md)。本页 71/333 是 Round-2 之前证据。
+> **2026-11-18 Round-2**：又修复“identity 缺失仍按旧同标题认领”和“检查原因改变 paused/waiting_owner 发布决定”，新增身份+列表同源核验、严格预发送基线、诊断只读及完整离线演示。最新报告见 [`PUBLICATION_AGENT_ROUND2_DELIVERY.md`](../../delivery/PUBLICATION_AGENT_ROUND2_DELIVERY.md)，回滚见 [`PUBLICATION_AGENT_ROLLBACK.md`](../../delivery/PUBLICATION_AGENT_ROLLBACK.md)。本页 71/333 是 Round-2 之前证据。
 
 ## 1. 本轮修复摘要
 

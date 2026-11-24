@@ -26,7 +26,7 @@ from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
-from bot.adapters.llm import DeepSeekLLM, _RetryableHTTP
+from bot.adapters.llm import DeepSeekLLM, LLMOutputError, _RetryableHTTP
 from bot.adapters.publishers import MockPublisher, Publisher
 from bot.config import DEFAULTS, Config, Secrets, load_config
 from bot.services import drafts as drafts_service
@@ -372,6 +372,59 @@ class BudgetTests(unittest.TestCase):
             self.assertEqual(row["prompt_tokens"], 120)
             self.assertGreater(row["cost_usd"], 0)
             self.assertEqual(row["reserved_usd"], 0)
+        finally:
+            cleanup(env)
+
+    def test_invalid_writer_json_retries_once_with_budgeted_attempt(self) -> None:
+        env = new_env("budget-json-retry")
+        try:
+            env.config.secrets.deepseek_api_key = "test-key-not-used"
+            env.config.data["budget"]["daily_usd"] = 1.00
+            env.config.data["llm"]["max_retries"] = 1
+            guard = BudgetGuard(env.db, env.config, env.clock)
+            llm = DeepSeekLLM(env.config, env.clock, guard, sleep=lambda _s: None)
+            calls: list[dict] = []
+
+            def fake_post(body, key):
+                calls.append(body)
+                content = '{"title": "broken"' if len(calls) == 1 else '{"title": "ok"}'
+                return {
+                    "model": "deepseek-flash",
+                    "choices": [{"message": {"content": content}}],
+                    "usage": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70},
+                }
+
+            llm._post = fake_post  # type: ignore[assignment]
+            response = llm.complete_json(purpose="draft", payload={"evidence": []})
+            self.assertEqual(response.data["title"], "ok")
+            self.assertEqual(len(calls), 2)
+            self.assertIn("完整合法", calls[1]["messages"][-1]["content"])
+            self.assertEqual(env.db.scalar("SELECT COUNT(*) FROM llm_usage"), 2)
+        finally:
+            cleanup(env)
+
+    def test_invalid_writer_json_retry_is_bounded_to_one(self) -> None:
+        env = new_env("budget-json-retry-bounded")
+        try:
+            env.config.secrets.deepseek_api_key = "test-key-not-used"
+            env.config.data["budget"]["daily_usd"] = 1.00
+            env.config.data["llm"]["max_retries"] = 2
+            guard = BudgetGuard(env.db, env.config, env.clock)
+            llm = DeepSeekLLM(env.config, env.clock, guard, sleep=lambda _s: None)
+            calls: list[dict] = []
+
+            def fake_post(body, key):
+                calls.append(body)
+                return {
+                    "model": "deepseek-flash",
+                    "choices": [{"message": {"content": '{"title": "broken"'}}],
+                    "usage": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70},
+                }
+
+            llm._post = fake_post  # type: ignore[assignment]
+            with self.assertRaises(LLMOutputError):
+                llm.complete_json(purpose="draft", payload={"evidence": []})
+            self.assertEqual(len(calls), 2)
         finally:
             cleanup(env)
 

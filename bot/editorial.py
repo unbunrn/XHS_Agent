@@ -47,11 +47,18 @@ PROFILE_DEFAULTS: dict[str, Any] = {
         "diagram",
         "argument",
         "annotated",
+        "stat",
+        "quote",
+        "timeline",
+        "checklist",
+        "qa",
     ],
     "avoid": [
         "固定四段式、固定卡片数量或固定三种布局组合",
         "图片逐段复述正文",
         "为了流程图而编造不存在的先后顺序",
+        "逐篇重复相同的开篇套话和问句标题",
+        "AI 八股腔调（值得一提的是、不得不说、总的来说、不是……而是……）",
     ],
     "updated_at": "",
 }

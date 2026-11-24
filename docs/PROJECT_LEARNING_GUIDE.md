@@ -132,7 +132,7 @@ adapters负责DeepSeek、飞书、小红书等外部协议。理想情况下，�
 
 搜索摘要、网页正文和模型解释是三种不同东西。摘要可能由搜索模型生成，不应自动变成“原文说了什么”的证据。正文也可能含导航、广告或提示词攻击，需要提取和审查。
 
-当前链路曾因前两个空正文耗尽抓取名额而失败。详细改进见[检索改进方案](RESEARCH_PIPELINE_REPAIR.md)。这是“能连接API”和“能稳定找对证据”的差别。
+当前链路曾因前两个空正文耗尽抓取名额而失败。详细改进见[检索改进方案](archive/RESEARCH_PIPELINE_REPAIR.md)。这是“能连接API”和“能稳定找对证据”的差别。
 
 ### 第四步：写稿与图片策划
 
@@ -455,7 +455,7 @@ $env:PYTHONIOENCODING = 'utf-8'
 1. [项目入口](../bot/cli.py) → [worker](../bot/worker.py)：程序怎么启动、一个tick做什么。
 2. [数据库](../bot/db.py) → [schema](../bot/schema.py) → [jobs](../bot/jobs.py)：事务、表结构、任务生命周期。
 3. [飞书接收](../bot/lark_gateway.py) → [审批服务](../bot/services/approvals.py)：身份、幂等与命令。
-4. [选题](../bot/services/topics.py) → [研究](../bot/services/research.py) → [来源适配器](../bot/adapters/sources.py)：从输入到证据。
+4. [创作入口](../bot/services/creator_agent/entry.py) → [研究](../bot/services/research.py) → [来源适配器](../bot/adapters/sources.py)：从输入到证据。
 5. [模型适配器](../bot/adapters/llm.py) → [内容模型](../bot/content.py) → [编辑验收](../bot/editorial.py) → [渲染](../bot/render.py)。
 6. [稿件服务](../bot/services/drafts.py) → [通知](../bot/services/notifications.py)：版本、图片、审批与通知。
 7. [发布闸门](../bot/services/publish.py) → [发布适配器](../bot/adapters/publishers.py) → [业务结果](../bot/services/publication_results.py) → [只读对账](../bot/services/reconcile_readonly.py)。

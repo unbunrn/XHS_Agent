@@ -23,8 +23,8 @@ from bot.services.creator_agent.entry import (
     enqueue_brief,
     run_job,
 )
-from bot.services.creator_agent.live import LiveRuntime, _quote_for_claim
-from bot.services.creator_agent.registry import ToolRegistry
+from bot.services.creator_agent.live import DraftValidationError, LiveRuntime, _quote_for_claim
+from bot.services.creator_agent.registry import ToolRegistry, ToolSpec
 from bot.services.creator_agent.runner import AgentResult, AgentRunner
 from bot.services.creator_agent.store import AgentStore
 from bot.services.creator_agent.tools import register_tools
@@ -48,7 +48,7 @@ class RevisionDecisions:
         self.parent_version = int(parent_version)
         self.decisions = [
             {"action": "revise_artifact", "args": {
-                "instruction": "保留第二张图，更新标题",
+                "instruction": "调整配图排版，保留第二张图",
                 "material_ids": [],
                 "revision_plan": {"preserve": ["image:2"]},
             }},
@@ -159,7 +159,7 @@ class LiveRuntimeTests(TestCase):
         self.assertEqual(claims[0].status, "uncertain")
         self.assertEqual(claims[0].quote, "")
 
-    def test_claim_quote_is_generated_from_reviewer_excerpt_not_full_body(self):
+    def test_claim_quote_uses_full_body_after_short_excerpt(self):
         self.runtime._bodies["M1"] = "前文没有数字。" * 200 + "解码速度超过150tps。"
         self.runtime._materials["M1"] = Material(
             material_id="M1", url="https://example.com", title="Example",
@@ -169,8 +169,8 @@ class LiveRuntimeTests(TestCase):
             SimpleNamespace(text="解码速度超过150 tps。", evidence_ids=["M1"], core=False)
         ])
         claims = self.runtime._claims_from_content(content, ["M1"])
-        self.assertEqual(claims[0].status, "uncertain")
-        self.assertEqual(claims[0].quote, "")
+        self.assertEqual(claims[0].status, "supported")
+        self.assertIn("150", claims[0].quote)
 
     def test_public_body_omits_source_urls_and_report_boilerplate(self):
         materials, artifact = self._ready_artifact()
@@ -345,7 +345,7 @@ class LiveRuntimeTests(TestCase):
             self.env.db, self.env.config, self.env.clock,
             message_id="v2-revision-1", sender_id="owner-open-id",
             chat_id="owner-open-id", chat_type="p2p",
-            text="v2 修改 少讲技术，保留第一张图",
+            text="v2 修改 调整配图排版，保留第一张图",
         )
         self.assertTrue(accepted["ok"], accepted)
         self.assertEqual(accepted["outcome"], "creator_revision_queued")
@@ -362,10 +362,296 @@ class LiveRuntimeTests(TestCase):
         self.assertTrue(parent_materials)
         revised = self.runtime.revise_artifact(
             brief=revision_brief, base_artifact=artifact,
-            instruction="少讲技术，保留第二张图",
+            instruction="调整配图排版，保留第二张图",
             material_ids=[m.material_id for m in parent_materials],
         )
         self.assertEqual([image.get("sha256") for image in revised.images], old_hashes)
+
+    def test_revision_writer_gets_larger_output_budget(self):
+        materials, artifact = self._ready_artifact()
+        brief = CreativeBrief(
+            run_key="ca-revision-budget", account_id=self.brief.account_id,
+            origin="revision", topic=self.brief.topic, instruction="调整配图排版",
+            generation=2, base_artifact_version=artifact.version,
+            parent_run_key=self.brief.run_key,
+        )
+        self.store.ensure_run(brief)
+        seen: list[int] = []
+        original = self.env.llm.complete_json
+
+        def capture(*, purpose, payload, max_output_tokens=1800, before_attempt=None):
+            seen.append(max_output_tokens)
+            return original(
+                purpose=purpose, payload=payload,
+                max_output_tokens=max_output_tokens, before_attempt=before_attempt,
+            )
+
+        with patch.object(self.env.llm, "complete_json", side_effect=capture):
+            self.runtime.revise_artifact(
+                brief=brief, base_artifact=artifact, instruction="调整配图排版",
+                material_ids=[m.material_id for m in materials],
+            )
+        self.assertEqual(seen, [2600])
+
+    def test_revision_inherits_parent_run_materials_with_original_ids(self):
+        materials, artifact = self._ready_artifact()
+        loaded = self.runtime.load_parent_artifact(artifact)
+        self.assertEqual(
+            [m.material_id for m in loaded],
+            [m.material_id for m in materials],
+        )
+        for material in loaded:
+            self.assertEqual(
+                self.runtime._bodies[material.material_id],
+                self.store.material_body(artifact.run_key, material.material_id),
+            )
+
+    def test_revision_evidence_keeps_full_body_past_900_chars(self):
+        body = "导航。" + ("前文" * 500) + "单次前台输出最多 65,536 tokens。"
+        self.runtime._materials["M1"] = Material(
+            material_id="M1", url="https://example.com/long", title="Long",
+            content_hash="h", quote="导航。",
+        )
+        self.runtime._bodies["M1"] = body
+        evidence, _ids = self.runtime._evidence(["M1"])
+        self.assertGreater(len(evidence[0]["quote"]), 900)
+        self.assertIn("65,536", evidence[0]["quote"])
+        claims = self.runtime._claims_from_content(
+            SimpleNamespace(
+                claims=[
+                    SimpleNamespace(
+                        text="单次前台输出最多 65,536 tokens",
+                        evidence_ids=["M1"],
+                        core=False,
+                    )
+                ]
+            ),
+            ["M1"],
+        )
+        self.assertEqual(claims[0].status, "supported")
+
+    def test_revision_keeps_number_supported_by_long_parent_body(self):
+        materials, artifact = self._ready_artifact()
+        material_id = materials[0].material_id
+        number = "单次前台输出最多 65,536 tokens"
+        body = "导航。" + ("前文" * 500) + number + "。" + self.runtime._bodies[material_id]
+        self.runtime._bodies[material_id] = body
+        artifact.content["caption"] = [number]
+        artifact.content["claims"] = [
+            {"text": number, "type": "fact", "evidence_ids": [material_id]}
+        ]
+        brief = CreativeBrief(
+            run_key="ca-revision-long-number", account_id=self.brief.account_id,
+            origin="revision", topic=self.brief.topic, instruction="调整配图排版",
+            generation=2, base_artifact_version=artifact.version,
+            parent_run_key=self.brief.run_key,
+        )
+        self.store.ensure_run(brief)
+        revised = self.runtime.revise_artifact(
+            brief=brief, base_artifact=artifact, instruction="调整配图排版",
+            material_ids=[material_id],
+        )
+        self.assertIn("65,536", "\n".join(revised.content["caption"]))
+
+    def test_registry_preserves_structured_issue_data(self):
+        def fail(args, context):
+            raise DraftValidationError(
+                "bad draft",
+                issues=[{"field": "caption", "type": "numeric", "snippet": "65,536"}],
+                candidate={"title": "candidate"},
+            )
+
+        registry = ToolRegistry()
+        registry.register(ToolSpec(
+            name="fail_revision", description="fail", schema={}, handler=fail,
+        ))
+        result = registry.execute("fail_revision", {}, None)
+        self.assertFalse(result.ok)
+        self.assertIn("DraftValidationError", result.error)
+        self.assertEqual(result.data["issues"][0]["type"], "numeric")
+        self.assertEqual(result.data["candidate"]["title"], "candidate")
+
+    def test_revision_rejects_in_flight_publication(self):
+        _materials, artifact = self._ready_artifact()
+        first = self.runtime.submit_for_approval(brief=self.brief, artifact=artifact)
+        self.assertTrue(first.ok, first.error)
+        approval = self.env.db.fetchone("SELECT * FROM approvals ORDER BY id DESC LIMIT 1")
+        candidate = {
+            "run_key": self.brief.run_key, "version": artifact.version,
+            "draft_id": approval["draft_id"], "generation": 1,
+            "brief_json": json.dumps({"topic": self.brief.topic}, ensure_ascii=False),
+            "account_id": approval["account_id"], "approval_id": approval["id"],
+            "approval_code": approval["code"], "approval_status": "pending",
+            "active_publication": 1,
+        }
+        with patch(
+            "bot.services.creator_agent.entry._revision_candidates",
+            return_value=[candidate],
+        ):
+            accepted = handle_inbound_message(
+                self.env.db, self.env.config, self.env.clock,
+                message_id="modify-in-flight-1", sender_id="owner-open-id",
+                chat_id="owner-open-id", chat_type="p2p",
+                text=f"修改 {approval['code']} 标题改短一点",
+            )
+        self.assertFalse(accepted["ok"])
+        self.assertEqual(accepted["outcome"], "revision_in_flight")
+        note = self.env.db.fetchone(
+            "SELECT payload_json FROM notifications WHERE dedupe_key=?",
+            ("inbound:modify-in-flight-1",),
+        )
+        self.assertIsNotNone(note)
+        self.assertIn("不能就地换稿", note["payload_json"])
+
+    def test_modify_xh_code_uses_creator_revision_and_queues_ack(self):
+        _materials, artifact = self._ready_artifact()
+        submitted = self.runtime.submit_for_approval(brief=self.brief, artifact=artifact)
+        self.assertTrue(submitted.ok, submitted.error)
+        code = submitted.data["approval_code"]
+        accepted = handle_inbound_message(
+            self.env.db, self.env.config, self.env.clock,
+            message_id="modify-xh-1", sender_id="owner-open-id",
+            chat_id="owner-open-id", chat_type="p2p",
+            text=f"修改 {code} 标题改短一点",
+        )
+        self.assertTrue(accepted["ok"], accepted)
+        self.assertEqual(accepted["outcome"], "creator_revision_queued")
+        row = self.env.db.fetchone(
+            "SELECT status FROM approvals WHERE code=?", (code,)
+        )
+        self.assertEqual(row["status"], "revision_pending")
+        self.assertEqual(
+            self.env.db.fetchone(
+                "SELECT COUNT(*) AS n FROM jobs WHERE kind='revise'"
+            )["n"],
+            0,
+        )
+        note = self.env.db.fetchone(
+            "SELECT payload_json FROM notifications WHERE dedupe_key=?",
+            ("inbound:modify-xh-1",),
+        )
+        self.assertIsNotNone(note)
+        self.assertIn(code, note["payload_json"])
+        self.assertIn("重新送审", note["payload_json"])
+
+    def test_second_revision_waits_for_the_first_queued_revision(self):
+        _materials, artifact = self._ready_artifact()
+        submitted = self.runtime.submit_for_approval(brief=self.brief, artifact=artifact)
+        self.assertTrue(submitted.ok, submitted.error)
+        code = submitted.data["approval_code"]
+        first = handle_inbound_message(
+            self.env.db, self.env.config, self.env.clock,
+            message_id="modify-race-1", sender_id="owner-open-id",
+            chat_id="owner-open-id", chat_type="p2p",
+            text=f"修改 {code} 调整配图排版",
+        )
+        self.assertTrue(first["ok"], first)
+        second = handle_inbound_message(
+            self.env.db, self.env.config, self.env.clock,
+            message_id="modify-race-2", sender_id="owner-open-id",
+            chat_id="owner-open-id", chat_type="p2p",
+            text=f"修改 {code} 标题改短一点",
+        )
+        self.assertFalse(second["ok"])
+        self.assertEqual(second["outcome"], "revision_already_running")
+        self.assertEqual(
+            self.env.db.fetchone(
+                "SELECT COUNT(*) AS n FROM jobs WHERE kind='creator_agent_run'"
+            )["n"],
+            1,
+        )
+        note = self.env.db.fetchone(
+            "SELECT payload_json FROM notifications WHERE dedupe_key=?",
+            ("inbound:modify-race-2",),
+        )
+        self.assertIsNotNone(note)
+        self.assertIn("已有一轮修改正在进行", note["payload_json"])
+
+    def test_modify_without_code_asks_which_work_when_ambiguous(self):
+        _materials, artifact = self._ready_artifact()
+        submitted = self.runtime.submit_for_approval(brief=self.brief, artifact=artifact)
+        self.assertTrue(submitted.ok, submitted.error)
+        first = self.env.db.fetchone("SELECT * FROM approvals ORDER BY id DESC LIMIT 1")
+        second_code = "XH-AMBIG2"
+        candidates = [
+            {
+                "run_key": self.brief.run_key, "version": artifact.version,
+                "draft_id": first["draft_id"], "generation": 1,
+                "brief_json": json.dumps({"topic": "第一篇"}, ensure_ascii=False),
+                "account_id": first["account_id"], "approval_id": first["id"],
+                "approval_code": first["code"], "approval_status": "pending",
+                "active_publication": None,
+            },
+            {
+                "run_key": "ca-ambiguity-second", "version": 1,
+                "draft_id": first["draft_id"] + 1, "generation": 1,
+                "brief_json": json.dumps({"topic": "第二篇"}, ensure_ascii=False),
+                "account_id": first["account_id"], "approval_id": first["id"] + 1,
+                "approval_code": second_code, "approval_status": "pending",
+                "active_publication": None,
+            },
+        ]
+        with patch(
+            "bot.services.creator_agent.entry._revision_candidates",
+            return_value=candidates,
+        ):
+            accepted = handle_inbound_message(
+                self.env.db, self.env.config, self.env.clock,
+                message_id="modify-ambiguous-1", sender_id="owner-open-id",
+                chat_id="owner-open-id", chat_type="p2p",
+                text="修改 标题改短一点",
+            )
+        self.assertFalse(accepted["ok"])
+        self.assertEqual(accepted["outcome"], "revision_ambiguous")
+        note = self.env.db.fetchone(
+            "SELECT payload_json FROM notifications WHERE dedupe_key=?",
+            ("inbound:modify-ambiguous-1",),
+        )
+        self.assertIsNotNone(note)
+        self.assertIn(second_code, note["payload_json"])
+        self.assertIn(first["code"], note["payload_json"])
+
+    def test_revision_without_visible_change_returns_structured_issue(self):
+        materials, artifact = self._ready_artifact()
+        brief = CreativeBrief(
+            run_key="ca-revision-noop", account_id=self.brief.account_id,
+            origin="revision", topic=self.brief.topic, instruction="保持原样",
+            generation=2, base_artifact_version=artifact.version,
+            parent_run_key=self.brief.run_key,
+        )
+        self.store.ensure_run(brief)
+        with self.assertRaises(DraftValidationError) as caught:
+            self.runtime.revise_artifact(
+                brief=brief, base_artifact=artifact, instruction="保持原样",
+                material_ids=[m.material_id for m in materials],
+            )
+        self.assertEqual(caught.exception.issues[0]["type"], "no_change")
+        self.assertEqual(
+            self.env.db.fetchone(
+                "SELECT COUNT(*) AS n FROM creator_agent_artifacts WHERE run_key=?",
+                (brief.run_key,),
+            )["n"],
+            0,
+        )
+
+    def test_title_only_revision_keeps_caption_and_storyboard(self):
+        materials, artifact = self._ready_artifact()
+        artifact.title = "这是一条很长很长需要被缩短的小红书标题"
+        artifact.content["title"] = artifact.title
+        brief = CreativeBrief(
+            run_key="ca-revision-title", account_id=self.brief.account_id,
+            origin="revision", topic=self.brief.topic, instruction="标题改短一点",
+            generation=2, base_artifact_version=artifact.version,
+            parent_run_key=self.brief.run_key,
+        )
+        self.store.ensure_run(brief)
+        revised = self.runtime.revise_artifact(
+            brief=brief, base_artifact=artifact, instruction="标题改短一点",
+            material_ids=[m.material_id for m in materials],
+        )
+        self.assertNotEqual(revised.title, artifact.title)
+        self.assertEqual(revised.content["caption"], artifact.content["caption"])
+        self.assertEqual(revised.content["storyboard"], artifact.content["storyboard"])
 
     def test_lowercase_command_prefix_is_stripped(self):
         brief = brief_from_text(
@@ -385,14 +671,14 @@ class LiveRuntimeTests(TestCase):
             self.env.db, self.env.config, self.env.clock,
             message_id="v2-revision-no-must-keep", sender_id="owner-open-id",
             chat_id="owner-open-id", chat_type="p2p",
-            text="V2 修改 更新标题",
+            text="V2 修改 调整配图排版",
         )
         self.assertTrue(accepted["ok"], accepted)
         revision_brief = CreativeBrief(**accepted["detail"]["brief"])
         self.store.ensure_run(revision_brief)
         revised = self.runtime.revise_artifact(
             brief=revision_brief, base_artifact=artifact,
-            instruction="更新标题",
+            instruction="调整配图排版",
             material_ids=[m.material_id for m in self.runtime.load_parent_artifact(artifact)],
         )
         self.assertEqual(len(revised.images), 2)
@@ -697,7 +983,7 @@ class LiveRuntimeTests(TestCase):
             self.env.db, self.env.config, self.env.clock,
             message_id="v2-revision-image-2", sender_id="owner-open-id",
             chat_id="owner-open-id", chat_type="p2p",
-            text="V2 修改 改第一张，第二张原样保留",
+            text="V2 修改 调整配图排版，改第一张，第二张原样保留",
         )
         self.assertTrue(accepted["ok"], accepted)
         revision_brief = CreativeBrief(**accepted["detail"]["brief"])
@@ -712,7 +998,7 @@ class LiveRuntimeTests(TestCase):
         revision_runtime.renderer = render_two
         revised = revision_runtime.revise_artifact(
             brief=revision_brief, base_artifact=artifact,
-            instruction="改第一张，第二张原样保留",
+            instruction="调整配图排版，改第一张，第二张原样保留",
             material_ids=[m.material_id for m in revision_runtime.load_parent_artifact(artifact)],
         )
         revised = revision_runtime.render_images(brief=revision_brief, artifact=revised)
@@ -753,7 +1039,7 @@ class LiveRuntimeTests(TestCase):
             self.env.db, self.env.config, self.env.clock,
             message_id="v2-worker-revision-1", sender_id="owner-open-id",
             chat_id="owner-open-id", chat_type="p2p",
-            text="V2 修改 保留第二张图，更新标题",
+            text="V2 修改 调整配图排版，保留第二张图",
         )
         self.assertTrue(accepted["ok"], accepted)
         brief = CreativeBrief(**accepted["detail"]["brief"])
@@ -798,7 +1084,7 @@ class LiveRuntimeTests(TestCase):
         self.assertEqual(observation["parent_artifact"]["version"], parent.version)
         self.assertTrue(observation["materials"])
         self.assertTrue(
-            any(str(m["material_id"]).startswith("P") for m in observation["materials"])
+            any(str(m["material_id"]).startswith("M") for m in observation["materials"])
         )
 
         approvals = self.env.db.fetchall(

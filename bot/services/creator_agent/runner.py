@@ -339,10 +339,14 @@ class AgentRunner:
                     state.counters["model_calls"] += current - seen
                     state.counters["_runtime_model_calls"] = current
 
+            step_result = dict(result.data) if result.ok else {
+                "error": result.error,
+                **dict(result.data or {}),
+            }
             self.store.update_step(
                 brief.run_key,
                 step_seq,
-                result=result.data if result.ok else {"error": result.error},
+                result=step_result,
                 status="ok" if result.ok else "failed",
             )
             history = self.store.steps(brief.run_key, 100)
@@ -389,20 +393,37 @@ class AgentRunner:
         """
         consecutive_revise = 0
         last_review_requires_images = False
+        last_review_has_other_issues = False
+        render_attempted_since_draft = False
         for step in reversed(history):
+            action = str(step.get("action") or "")
+            if action == "render_images" and step.get("status") in {"ok", "failed"}:
+                render_attempted_since_draft = True
             if step.get("status") != "ok":
                 continue
-            action = str(step.get("action") or "")
             if action == "revise_artifact":
                 consecutive_revise += 1
                 continue
             if action == "review_artifact":
-                blob = json.dumps(step.get("result") or {}, ensure_ascii=False).lower()
+                res = step.get("result") or {}
+                review_data = res.get("review") if isinstance(res, dict) else {}
+                issues = review_data.get("issues") if isinstance(review_data, dict) else []
+                blob = json.dumps(res, ensure_ascii=False).lower()
                 last_review_requires_images = "no rendered images" in blob
+                if isinstance(issues, list):
+                    last_review_has_other_issues = any(
+                        "no rendered images" not in json.dumps(item, ensure_ascii=False).lower()
+                        for item in issues
+                    )
                 break
             if action in {"render_images", "draft_artifact", "inspect_layout"}:
                 break
-        if last_review_requires_images and not latest.images:
+        if (
+            last_review_requires_images
+            and not latest.images
+            and not last_review_has_other_issues
+            and not render_attempted_since_draft
+        ):
             return "review requires rendered images; call render_images before revise_artifact"
         if consecutive_revise >= 1:
             return "revision already attempted; call review_artifact or render_images before another revise_artifact"

@@ -1,0 +1,528 @@
+{
+  "negatives": [
+    {
+      "id": 49,
+      "title": "AI证黎曼猜想?先别急着信",
+      "body_json": {
+        "caption": [
+          "看到外媒报道说AI证明了黎曼猜想,我第一反应是:真的假的?仔细一看,目前还只是「宣称」,离「被承认」差得远。",
+          "11月20日,Anthropic的数学家Levent Alpöge在个人网站发声明,说他和Claude合作找到了黎曼猜想以及广义黎曼猜想的证明。但他公开的不是传统论文,而是14个压缩分卷、约1700万行的Lean形式化证明代码;据他估计,整理成文字稿可能达25万页。",
+          "数学界的反应很谨慎。据媒体报道,克雷数学研究所所长布里德森表示,评估是否真的找到证明仍需时间;菲尔兹奖得主陶哲轩也说,验证还有一段路要走。Anthropic也没有为这个证明背书。",
+          "同一天还有另一件事:美国数学学会主席瓦基尔公布了一份940页的广义黎曼猜想证明草稿,作者是数学家马苏洛,纯人力完成,耗时12年。两件事撞在一起,挺耐人寻味。",
+          "另外,今年9月包括陶哲轩在内的25位菲尔兹奖得主联合发表声明《人工智能在数学中的严重错位》,提醒AI公司和数学共同体的目标并不完全一致。",
+          "所以我的判断是:AI参与数学发现值得关注,但「宣称证明」和「学术共同体承认」之间,还隔着独立验证这道硬门槛。现在就说黎曼猜想被攻克,太早了。"
+        ],
+        "claims": [
+          {
+            "evidence_ids": [
+              "M1",
+              "M2"
+            ],
+            "text": "11月20日,Anthropic数学家Levent Alpöge发表声明称,他与Claude合作找到了黎曼猜想及广义黎曼猜想的证明。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M1",
+              "M3"
+            ],
+            "text": "Alpöge公开的是14个压缩分卷、约1700万行的Lean形式化证明代码,他估计文字稿可能达25万页。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M3",
+              "M4"
+            ],
+            "text": "克雷数学研究所所长布里德森表示,评估是否真的找到证明仍需时间;菲尔兹奖得主陶哲轩也认为验证还有一段路要走。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M1",
+              "M3"
+            ],
+            "text": "Anthropic没有为Alpöge的证明主张公开背书。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M2"
+            ],
+            "text": "同一天,美国数学学会主席瓦基尔公布数学家马苏洛耗时12年、纯人力完成的940页广义黎曼猜想证明草稿,邀请同行检查。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M3",
+              "M4"
+            ],
+            "text": "今年9月,包括陶哲轩在内的25位菲尔兹奖得主联合发表声明《人工智能在数学中的严重错位》。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [],
+            "text": "AI宣称找到证明不等于学术共同体承认,独立验证尚未完成,现在下结论太早。",
+            "type": "analysis"
+          }
+        ],
+        "editorial_plan": {
+          "angle": "把「宣称」和「被承认」拆开讲,用同日发生的纯人力证明做对照,帮读者建立判断框架。",
+          "audience_need": "读者看到「AI证明黎曼猜想」的热搜,想知道这事到底靠不靠谱、该信几分。",
+          "caption_image_division": "正文用第一人称讲判断和感受,把事件脉络和态度说清楚;图片用一张封面定调「宣称≠承认」,再加一张对比卡把AI声明和人力证明并置,强化反差。",
+          "rationale": "这个话题的核心不是技术细节,而是「可信度判断」。读者需要的是快速建立「宣称/承认」的区分,正文适合承担解释和态度,图片适合用对比制造记忆点,所以选 balanced。",
+          "strategy": "balanced",
+          "takeaway": "AI宣称找到证明不等于数学界承认,独立验证还没完成,现在下结论太早。",
+          "visual_approach": "封面用大字钩子点明「宣称≠承认」;第二张用两列对比,左边AI声明、右边人力证明,让读者一眼看到同一天的两条路径。"
+        },
+        "generator": "deepseek",
+        "model": "deepseek-flash",
+        "sections": [],
+        "sources": [
+          {
+            "date_precision": "unknown",
+            "evidence_id": "M1",
+            "fetched_at": null,
+            "name": "90后数学家宣称与Claude证明黎曼猜想",
+            "published_at": null,
+            "url": "https://export.shobserver.com/toutiao/html/1217877.html"
+          },
+          {
+            "date_precision": "unknown",
+            "evidence_id": "M2",
+            "fetched_at": null,
+            "name": "一位数学家花了12年，另一位借助AI仅用6周，“黎曼猜想”被证出来了？",
+            "published_at": null,
+            "url": "https://finance.sina.com.cn/wm/2026-11-21/doc-iniznnyc4963265.shtml"
+          },
+          {
+            "date_precision": "unknown",
+            "evidence_id": "M3",
+            "fetched_at": null,
+            "name": "90后数学家用AI证明黎曼猜想？数学界：验证仍需时间",
+            "published_at": null,
+            "url": "https://news.sina.com.cn/w/2026-11-22/doc-inizpkea1806709.shtml?cre=tianyi&mod=pcpager_fintoutiao&loc=39&r=0&rfunc=53&tj=cxvertical_pc_pager_spt&tr=174"
+          },
+          {
+            "date_precision": "unknown",
+            "evidence_id": "M4",
+            "fetched_at": null,
+            "name": "Anthropic数学家宣称借助AI证明黎曼猜想，菲尔兹奖得主：验证仍需要时间",
+            "published_at": null,
+            "url": "https://k.sina.cn/article_1887344341_707e96d502001ybja.html?vt=4&wm=/?from=page/%20leju_jdt.link%20/%20leju_jdt.link%20/%20leju_jdt.link_this_erji_yuming__this_erji_yuming__this_erji_yuming_&from=tech"
+          }
+        ],
+        "storyboard": {
+          "cards": [
+            {
+              "columns": [
+                {
+                  "label": "AI辅助",
+                  "text": "Alpöge称与Claude合作找到证明;公开14个压缩分卷、约1700万行Lean代码;文字稿或达25万页;Anthropic未背书"
+                },
+                {
+                  "label": "纯人力",
+                  "text": "马苏洛耗时12年完成940页广义黎曼猜想证明草稿;由美国数学学会主席瓦基尔公布,邀请同行检查"
+                }
+              ],
+              "evidence_ids": [
+                "M1",
+                "M2",
+                "M3"
+              ],
+              "headline": "同一天,两条路",
+              "kicker": "11月20日",
+              "layout": "comparison",
+              "note": "两者均待验证",
+              "points": [],
+              "subhead": ""
+            }
+          ],
+          "cover": {
+            "columns": [],
+            "evidence_ids": [
+              "M1",
+              "M3"
+            ],
+            "headline": "AI证黎曼猜想?先别急着信",
+            "kicker": "宣称 ≠ 承认",
+            "layout": "cover",
+            "note": "据媒体报道",
+            "points": [],
+            "subhead": "独立验证还没完成"
+          }
+        },
+        "tags": [
+          "AI",
+          "黎曼猜想",
+          "Claude",
+          "数学",
+          "学术验证"
+        ],
+        "title": "AI证黎曼猜想?先别急着信",
+        "uncertainties": [
+          "Alpöge声明发布于个人网站,非Anthropic官方公告;Anthropic未公开背书。",
+          "Lean代码是否完整通过验证、是否准确对应黎曼猜想,尚无公开独立结论。",
+          "马苏洛的940页草稿同样处于待同行审阅阶段。",
+          "事件具体日期以报道为准,原文发布时间未知。",
+          "以上为公开资料整理，未做个人实测；具体功能、价格和可用性以官方页面为准。"
+        ]
+      }
+    },
+    {
+      "id": 50,
+      "title": "AI证黎曼猜想?还没被承认",
+      "body_json": {
+        "caption": [
+          "看到外媒报道,Anthropic的数学家Alpöge在个人网站说,他和Claude一起找到了黎曼猜想的证明,还能推广到广义黎曼猜想。",
+          "但先别急着转发。这个证明还没经过数学界的人工独立验证,也没获得正式认可。他公布的是1700余万行Lean形式化代码,不是人类可读的论文;他自己说,整理出来可能至少25万页,而且他还没完全理解其中涉及的数学。",
+          "学者们的反应很有意思。丘成桐说这是“伟大的贡献”,数学进入新纪元;梅纳德认为对的可能性有98%;徐文强第一感觉是“应该是一个正确的证明”,但也强调还没严格验证。",
+          "争议点在时间:Anthropic 11月19日在纳斯达克上市,Alpöge次日公布。他自己也承认“时机很糟糕”。",
+          "另外,Alpöge不是普通AI研究员,他是普林斯顿数学博士,导师是菲尔兹奖得主Bhargava。今年7月,他和Claude提出的雅可比猜想三维反例,后来获得了独立形式化验证。所以这次不是空穴来风,但也远没到“学术共同体承认”那一步。",
+          "我的判断:这更像一个需要认真对待、但必须标注“未经独立验证”的声明。AI解题能力确实在变强,但“宣称证明”和“公认证明”之间,还隔着很长的验证路。"
+        ],
+        "claims": [
+          {
+            "evidence_ids": [
+              "M1",
+              "M2"
+            ],
+            "text": "Alpöge在个人网站声明,称自己与Claude合作发现了黎曼猜想的一个证明,并可推广至广义黎曼猜想。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M1",
+              "M2"
+            ],
+            "text": "该证明尚未获得数学界的人工独立验证与正式认可。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M1",
+              "M2"
+            ],
+            "text": "Alpöge公布的是1700余万行Lean形式化代码,而非人类可读的完整论文;他估计整理成论文可能至少25万页。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M1"
+            ],
+            "text": "丘成桐称这是“伟大的贡献”,表示数学进入了一个新的纪元。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M1"
+            ],
+            "text": "梅纳德认为该证明对的可能性有98%。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M1"
+            ],
+            "text": "徐文强表示第一感觉“应该是一个正确的证明”,但强调还没有经过严格验证。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M1",
+              "M2"
+            ],
+            "text": "Anthropic于11月19日在纳斯达克上市,Alpöge次日公布声明,他本人承认“时机很糟糕”。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M2"
+            ],
+            "text": "Alpöge是普林斯顿数学博士,导师为菲尔兹奖得主Manjul Bhargava;今年7月他与Claude提出的雅可比猜想三维反例后来获得独立形式化验证。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [],
+            "text": "我的判断:这更像一个需要认真对待、但必须标注“未经独立验证”的声明,离学术共同体承认还有距离。",
+            "type": "analysis"
+          }
+        ],
+        "editorial_plan": {
+          "angle": "从“宣称”和“承认”的差距切入,把学者评价、代码规模、时间点争议和Alpöge背景串起来,帮读者建立判断框架。",
+          "audience_need": "普通用户和独立开发者看到“AI证明黎曼猜想”的热搜,需要快速搞清:到底证没证?谁说的?学界认不认?",
+          "caption_image_division": "正文用第一人称口语化讲清来龙去脉和我的判断;图片用一张封面加一张对比卡,把“宣称”和“承认”的差距、关键数字和学者态度压缩成可扫读的信息。",
+          "rationale": "这个选题信息密度高、事实和观点需要区分,适合balanced:正文承担解释和判断,图片承担关键对比和数字,避免读者被单一标题带偏。",
+          "strategy": "balanced",
+          "takeaway": "Alpöge与Claude宣称证明了黎曼猜想及广义黎曼猜想,但尚未获学术共同体正式承认;学者评价积极但都强调未经严格验证。",
+          "visual_approach": "封面用问句钩子点出“还没被承认”;第二张用comparison两列,左边“已发生”列宣称、代码、学者初步评价,右边“未发生”列独立验证、正式认可、人类可读论文,让差距一目了然。"
+        },
+        "generator": "deepseek",
+        "model": "deepseek-flash",
+        "sections": [],
+        "sources": [
+          {
+            "date_precision": "unknown",
+            "evidence_id": "M1",
+            "fetched_at": null,
+            "name": "困扰数学界 167 年的黎曼猜想被AI辅助证明？丘成桐回应",
+            "published_at": null,
+            "url": "https://m.sohu.com/coo/zmtq/1104758711_114988?scm=10008.7964_13-7964_13-1111_1111.0-0.0-1-0-0-0.0&spm=smwp.content-zmtq.fd-d.28.1795313627858zZnzH7c&_trans_=000020_hwzmtq"
+          },
+          {
+            "date_precision": "unknown",
+            "evidence_id": "M2",
+            "fetched_at": null,
+            "name": "黎曼猜想被AI证明？90后数学家回应：论文篇幅可能至少25万页",
+            "published_at": null,
+            "url": "https://news.ycwb.com/ikimvjjtij/content_54353116.htm"
+          }
+        ],
+        "storyboard": {
+          "cards": [
+            {
+              "columns": [
+                {
+                  "label": "已发生",
+                  "text": "Alpöge称与Claude找到黎曼猜想及广义黎曼猜想的证明;公布1700余万行Lean代码;丘成桐称“伟大的贡献”,梅纳德认为对的可能性98%,徐文强第一感觉“应该正确”"
+                },
+                {
+                  "label": "未发生",
+                  "text": "尚未经数学界人工独立验证与正式认可;没有人类可读完整论文;Alpöge坦言未完全理解全部数学内容;Anthropic未公开背书"
+                }
+              ],
+              "evidence_ids": [
+                "M1",
+                "M2"
+              ],
+              "headline": "宣称 vs 承认",
+              "kicker": "差距在哪",
+              "layout": "comparison",
+              "note": "据新京报、羊城晚报报道",
+              "points": [],
+              "subhead": ""
+            }
+          ],
+          "cover": {
+            "columns": [],
+            "evidence_ids": [
+              "M1",
+              "M2"
+            ],
+            "headline": "AI证了黎曼猜想?",
+            "kicker": "先别急着信",
+            "layout": "cover",
+            "note": "据外媒报道,尚未独立验证",
+            "points": [],
+            "subhead": "宣称≠学术共同体承认"
+          }
+        },
+        "tags": [
+          "AI",
+          "黎曼猜想",
+          "Claude",
+          "数学",
+          "学术验证"
+        ],
+        "title": "AI证黎曼猜想?还没被承认",
+        "uncertainties": [
+          "事件具体日期和首发时间来自媒体报道,Alpöge个人网站声明原文未直接核实。",
+          "梅纳德98%的说法来自丘成桐转述,未见梅纳德本人公开文字确认。",
+          "Lean代码和25万页草稿的数字来自Alpöge自述及媒体报道,未经独立审计。",
+          "Anthropic是否正式背书该证明,报道称未公开背书,但公司后续态度可能变化。",
+          "以上为公开资料整理,未做个人实测;具体功能、价格和可用性以官方页面为准。",
+          "以上为公开资料整理，未做个人实测；具体功能、价格和可用性以官方页面为准。"
+        ]
+      }
+    },
+    {
+      "id": 51,
+      "title": "梅纳德:信Claude的证明,但要人懂",
+      "body_json": {
+        "caption": [
+          "看到外媒报道,2022年菲尔兹奖得主、牛津大学教授梅纳德聊了聊Claude参与证明黎曼猜想这事。他的态度挺有意思:有98%~99%的把握认为证明是对的,但话锋一转——真正关键的是人的理解。",
+          "他的信心从哪来?一是Lean把逻辑步骤逐条核查过了,二是他了解阿尔珀格以前的工作,觉得这人不太可能没检查就发。但他也提醒,形式化验证之外还有几项检查不能省。",
+          "最戳我的是他那个比喻:AI更像是跑完了最后一小段赛程,前面漫长艰难的探索还是靠人类数学家。而且25万页的东西没人能通读,他设想先让AI压缩到人能把握的规模,再由数学家去理解整体框架,几年内整理出人类可读版本。",
+          "所以现在的情况是:机器核验通过了,但数学界还没正式认可,克雷研究所也仍把黎曼猜想列为未解难题。丘成桐说数学进入新纪元,陶哲轩、邓煜则偏谨慎,觉得得等可读版本出来再说。",
+          "我自己的感觉是,这事最值得记住的不是“AI证明了黎曼猜想”这个标题,而是“证明”和“理解”第一次被拆开了。梅纳德说过去这两件事是相伴而生的,现在分开了。这可能是AI进数学圈后,真正要面对的新问题。"
+        ],
+        "claims": [
+          {
+            "evidence_ids": [
+              "M2"
+            ],
+            "text": "2022年菲尔兹奖得主、牛津大学教授詹姆斯·梅纳德表示,他有98%或99%的把握认为Claude参与的黎曼猜想证明是正确的。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M2"
+            ],
+            "text": "梅纳德的信心既来自Lean对逻辑步骤的核查,也来自他对阿尔珀格此前工作的了解。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M2"
+            ],
+            "text": "梅纳德强调“真正关键的是人的理解”,并设想先由AI将庞杂材料压缩到人类可把握的范围,再由数学家理解整体论证框架,几年内有望整理出人类可读的完整版本。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M2"
+            ],
+            "text": "梅纳德用赛跑作比:即便这份证明成立,AI也更像是跑完了最后一小段赛程,此前漫长艰难的探索仍依靠人类。",
+            "type": "fact"
+          },
+          {
+            "evidence_ids": [
+              "M3"
+            ],
+            "text": "截至目前,这一证明尚未获得数学界的人工独立验证与正式认可,克雷数学研究所仍将黎曼猜想列为未解难题。",
+            "type": "fact"
+          }
+        ],
+        "editorial_plan": {
+          "angle": "不重复“AI证黎曼猜想”的震惊体,而是借梅纳德的判断,把焦点从“对不对”转到“懂不懂”——形式化验证通过之后,人类理解为什么仍是门槛。",
+          "audience_need": "普通用户和独立开发者想知道:Claude参与证明黎曼猜想到底靠不靠谱?菲尔兹奖得主怎么看?为什么说“证明对了但还没被认可”?",
+          "caption_image_division": "正文用第一人称把梅纳德的判断、依据和“理解才是关键”讲透;图片只做一张封面钩子,不重复正文论证,把信息密度留给文字。",
+          "rationale": "这个选题的核心不是数据或步骤,而是一位菲尔兹奖得主对“AI证明”的态度转折——相信正确,但坚持理解优先。这种带判断和语气的观点,用口语化正文讲最自然;配图只需一张封面点出矛盾感,硬拆成多张卡片反而会把观点切碎。",
+          "strategy": "caption_led",
+          "takeaway": "梅纳德相信证明大概率正确,但强调“真正关键的是人的理解”;在人类可读版本出来、数学界正式认可之前,这仍是一个待消化的结果。",
+          "visual_approach": "封面用一句话制造反差:98%相信是对的,但“人没懂就不算数”。不铺卡片,让读者直接进正文看梅纳德怎么解释。"
+        },
+        "generator": "deepseek",
+        "model": "deepseek-flash",
+        "sections": [],
+        "sources": [
+          {
+            "date_precision": "unknown",
+            "evidence_id": "M2",
+            "fetched_at": null,
+            "name": "数学研究“进入了一个新纪元” 丘成桐等三位数学家回应AI辅助证明黎曼猜想",
+            "published_at": null,
+            "url": "https://www.stdaily.com/web/gdxw/2026-11/22/content_617299.html"
+          },
+          {
+            "date_precision": "unknown",
+            "evidence_id": "M3",
+            "fetched_at": null,
+            "name": "167年黎曼猜想“被AI证明”？这个周末数学界吵翻了",
+            "published_at": null,
+            "url": "https://finance.sina.cn/2026-11-22/detail-inizqwfe2784426.d.html?&cid=79649"
+          },
+          {
+            "date_precision": "unknown",
+            "evidence_id": "M4",
+            "fetched_at": null,
+            "name": "黎曼猜想被AI证明了？25万页证明“作者栏”该写谁",
+            "published_at": null,
+            "url": "https://finance.sina.cn/2026-11-22/detail-inizrhva8880262.d.html?vt=4&wm=1685?search_word"
+          }
+        ],
+        "storyboard": {
+          "cards": [],
+          "cover": {
+            "columns": [],
+            "evidence_ids": [
+              "M2",
+              "M4"
+            ],
+            "headline": "98%相信是对的,但人没懂就不算数",
+            "kicker": "菲尔兹奖得主谈Claude证黎曼猜想",
+            "layout": "cover",
+            "note": "据科技日报等媒体采访报道",
+            "points": [],
+            "subhead": "梅纳德:真正关键的是人的理解"
+          }
+        },
+        "tags": [
+          "AI",
+          "黎曼猜想",
+          "Claude",
+          "数学",
+          "菲尔兹奖"
+        ],
+        "title": "梅纳德:信Claude的证明,但要人懂",
+        "uncertainties": [
+          "事件发生于2026年11月20日前后,媒体报道时间为11月22日,具体采访发布时间未知。",
+          "梅纳德的98%~99%把握是其个人判断,不代表数学界正式结论。",
+          "Claude生成的超25万页文字证明未公开,其内容无法独立核实。",
+          "Anthropic上市与成果公布时间接近,有媒体讨论发布时点争议,但商业动机无法证实。",
+          "以上为公开资料整理，未做个人实测；具体功能、价格和可用性以官方页面为准。"
+        ]
+      }
+    }
+  ],
+  "positives": [
+    {
+      "id": "pos-1",
+      "title": "98% 相信，但还不算数",
+      "body_json": {
+        "title": "98% 相信，但还不算数",
+        "caption": [
+          "梅纳德给了一个很数学家的数字：98%～99%。他相信这份证明大概率是对的，但紧接着补了一句——没人读懂之前，它还不算完成。",
+          "1700 万行 Lean 代码，整理成文字大约 25 万页。数字吓人，可真正卡住数学家的不是机器算得慢，而是人类根本读不完。",
+          "克雷数学研究所的态度很清楚，黎曼猜想还在未解难题列表里挂着。",
+          "接下来看两点：有没有独立团队把 25 万页压缩到同行能审的篇幅，以及克雷什么时候松口。"
+        ],
+        "storyboard": {
+          "cover": {
+            "layout": "cover",
+            "headline": "98%相信是对的，\n但人没懂就不算数",
+            "kicker": "菲尔兹奖得主谈 AI 证明",
+            "subhead": "梅纳德：真正关键的是人的理解",
+            "note": "据科技日报报道"
+          },
+          "cards": []
+        }
+      }
+    },
+    {
+      "id": "pos-2",
+      "title": "用 Cursor 的先别急升级",
+      "body_json": {
+        "title": "用 Cursor 的先别急升级",
+        "caption": [
+          "先说结论：这次更新跟普通写周报的人关系不大，真正该看的是用 API 跑批量任务的人，计费那一栏变了。",
+          "新版把长上下文请求单列了费率，单次调用看着便宜，并发一上来账单会跳。",
+          "如果你正在用老配置跑夜间脚本，先把自动更新关掉，拿一条测试流核对完扣费再切。"
+        ],
+        "storyboard": {
+          "cover": {
+            "layout": "cover",
+            "headline": "做批量任务的，\n升级前先看计费栏",
+            "kicker": "API 费率变动提醒",
+            "subhead": "长上下文单独计价",
+            "note": "据官方更新日志"
+          },
+          "cards": []
+        }
+      }
+    },
+    {
+      "id": "pos-3",
+      "title": "两天两份证明：一条写12年",
+      "body_json": {
+        "title": "两天两份证明：一条写12年",
+        "caption": [
+          "11 月 20 日同一天，数学界收到了两份完全不同的黎曼猜想相关材料。",
+          "一边是 Anthropic 数学家 Alpöge 公开的 14 个压缩分卷、约 1700 万行 Lean 形式化代码。另一边，美国数学学会主席瓦基尔公布了数学家马苏洛纯人力耗时 12 年写完的 940 页草稿。",
+          "两边都没拿到同行认可。马苏洛的草稿邀请所有人去挑错，Alpöge 自己也承认还没读透全部细节。",
+          "真正有趣的问题留给半年后：哪一份会先有人类学者签字确认。"
+        ],
+        "storyboard": {
+          "cover": {
+            "layout": "cover",
+            "headline": "同一天，两条路",
+            "kicker": "11 月 20 日数学界",
+            "subhead": "1700 万行代码 vs 940 页手稿",
+            "note": "两者均待同行核验"
+          },
+          "cards": []
+        }
+      }
+    }
+  ]
+}

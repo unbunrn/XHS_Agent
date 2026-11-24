@@ -1,11 +1,15 @@
-"""S2 planning and source-identity contract tests (offline)."""
+"""S2 source-identity contract tests (offline).
+
+The fixed research-planning pipeline was removed and its planning tests were
+retired with it.  The source-identity policy library is retained and still
+tested here because it documents evidence rules that must not be weakened.
+"""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest import TestCase
 
-from bot.services.research_plan import build_research_plan, fallback_plan
 from bot.services.source_identity import (
     SourceVerdict,
     apply_verdicts,
@@ -30,61 +34,6 @@ class StubLLM:
 
 def _entry(url, content="", title="material"):
     return SimpleNamespace(url=url, title=title, content=content)
-
-
-class PlanTests(TestCase):
-    def setUp(self):
-        self.env = new_env("s2-plan")
-
-    def tearDown(self):
-        cleanup(self.env)
-
-    def test_fallback_preserves_two_distinct_versions_and_three_query_cap(self):
-        plan = fallback_plan(
-            topic="Fable 5.2 与 Mythos 5.2 发布",
-            query_base="Fable 5.2 Mythos 5.2",
-            supplied_url=None,
-        )
-        self.assertEqual(plan.versions, ["Fable 5.2", "Mythos 5.2"])
-        self.assertLessEqual(len(plan.queries), 3)
-
-    def test_model_plan_is_one_call_and_capped_at_three_queries(self):
-        llm = StubLLM(
-            {
-                "entities": ["Fable", "Mythos"],
-                "versions": ["Fable 5.2", "Mythos 5.2"],
-                "queries": ["q1", "q2", "q3", "q4", "q5"],
-                "claims": ["claim"],
-                "source_urls": ["https://example.com/a"],
-            }
-        )
-        plan = build_research_plan(
-            self.env.db,
-            self.env.config,
-            self.env.clock,
-            llm,
-            topic="两个版本",
-            query_base="两个版本",
-            supplied_url=None,
-        )
-        self.assertEqual(len(llm.calls), 1)
-        self.assertEqual(plan.queries, ["q1", "q2", "q3"])
-        self.assertEqual(plan.versions, ["Fable 5.2", "Mythos 5.2"])
-
-    def test_planning_failure_falls_back_without_retry(self):
-        llm = StubLLM(error=RuntimeError("model down"))
-        plan = build_research_plan(
-            self.env.db,
-            self.env.config,
-            self.env.clock,
-            llm,
-            topic="Fable 5.2",
-            query_base="Fable 5.2",
-            supplied_url=None,
-        )
-        self.assertEqual(len(llm.calls), 1)
-        self.assertEqual(plan.generator, "fallback")
-        self.assertIn("planning fallback", plan.note)
 
 
 class IdentityTests(TestCase):

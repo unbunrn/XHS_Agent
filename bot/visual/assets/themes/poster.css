@@ -1,0 +1,139 @@
+/* Theme: Poster (大字海报) */
+body.theme-poster {
+  --font-display: "BotDisplay", "BotBody", sans-serif;
+  --font-body: "BotBody", sans-serif;
+  --radius: 26px;
+}
+
+body.theme-poster::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at var(--glow-pos, 18% 82%), rgba(255, 255, 255, 0.14), transparent 55%);
+  z-index: 1;
+}
+
+/* Poster omits page numbers in folio on covers and keeps header ultra minimal */
+body.theme-poster .folio {
+  border-bottom: 2px solid rgba(255, 255, 255, 0.28);
+  padding-bottom: 16px;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+body.theme-poster.is-cover .folio-page {
+  display: none;
+}
+
+body.theme-poster .kicker {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  padding: 10px 24px;
+  border-radius: 999px;
+  font-size: 26px;
+}
+
+body.theme-poster .kicker .icon-svg {
+  color: #ffffff;
+}
+
+body.theme-poster .cover-headline {
+  color: #ffffff;
+  font-size: 112px;
+  line-height: 1.26;
+}
+
+body.theme-poster.is-cover .cover-hero {
+  flex: 1 1 auto;
+  justify-content: center;
+  gap: 36px;
+  padding: 24px 0;
+}
+
+body.theme-poster.is-cover .cover-hero::after {
+  content: "";
+  display: block;
+  width: 140px;
+  height: 12px;
+  background: var(--accent2, #ffe45e);
+  border-radius: 6px;
+}
+
+body.theme-poster .cover-split-box.accent-box {
+  background: var(--accent2, #ffe45e);
+  border-color: var(--accent2, #ffe45e);
+  color: #141416;
+}
+
+body.theme-poster .cover-split-box.accent-box .cover-headline {
+  color: #141416;
+}
+
+body.theme-poster .cover-subcard {
+  background: rgba(0, 0, 0, 0.24);
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  padding: 42px 42px;
+}
+
+body.theme-poster .cover-subhead,
+body.theme-poster .cover-attribution,
+body.theme-poster .stat-label {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+body.theme-poster .stat-num {
+  color: var(--accent2, #ffe45e);
+}
+
+body.theme-poster .list-card,
+body.theme-poster .col-panel,
+body.theme-poster .stat-card,
+body.theme-poster .quote-stage,
+body.theme-poster .qa-item,
+body.theme-poster .timeline-item,
+body.theme-poster .excerpt-box,
+body.theme-poster .cover-stat-item,
+body.theme-poster .cover-split-box {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+}
+
+body.theme-poster .list-badge {
+  background: var(--accent2, #ffe45e);
+  color: #141416;
+}
+
+body.theme-poster .card-headline,
+body.theme-poster .list-text,
+body.theme-poster .col-text,
+body.theme-poster .quote-text,
+body.theme-poster .timeline-desc,
+body.theme-poster .qa-a,
+body.theme-poster .stat-card-label {
+  color: #ffffff;
+}
+
+body.theme-poster .qa-q,
+body.theme-poster .timeline-date,
+body.theme-poster .stat-card-num,
+body.theme-poster .col-label,
+body.theme-poster .arg-tag,
+body.theme-poster .excerpt-tag {
+  color: var(--accent2, #ffe45e);
+}
+
+body.theme-poster .card-subhead,
+body.theme-poster .quote-attr,
+body.theme-poster .card-footer {
+  color: rgba(255, 255, 255, 0.78);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+body.theme-poster mark {
+  background: var(--accent2, #ffe45e);
+  color: #141416;
+  padding: 2px 8px;
+}

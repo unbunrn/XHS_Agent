@@ -1,4 +1,4 @@
-"""Durable worker: collect -> research -> draft -> notify -> gate -> publish.
+"""Durable worker: discover -> create/revise -> approve -> publish -> reconcile.
 
 The worker can be restarted at any time.  Publishing is never retried blindly:
 an interrupted or ambiguous attempt is moved to ``publish_unknown`` for the
@@ -10,10 +10,10 @@ run the whole loop deterministically.
 # 中文导读：机器人的“心脏”
 # =============================================================================
 # 这个 Worker 是一个可以随时重启的循环，每一轮（tick）大致做这些事：
-#   1. 检查要不要安排下一次采集；
+#   1. 检查要不要安排下一次选题发现；
 #   2. 把过期没处理的审批单标记为 expired；
 #   3. 把还没发出去的通知发掉；
-#   4. 从任务队列领任务并执行（采集 / 写稿 / 发布）；
+#   4. 从任务队列领任务并执行（选题发现 / 创作 / 发布 / 修改）；
 #   5. 记录还拿不到的数据指标（先记 missing，不编假数字）。
 #
 # 为什么发布“绝不盲目重试”？
@@ -41,7 +41,7 @@ from .adapters.types import NotConfigured
 from .audit import audit
 from .budget import BudgetGuard
 from .config import Config, load_config
-from .db import Database, get_setting, set_setting
+from .db import Database, set_setting
 from .editorial import RevisionUnsatisfied, change_summary_lines
 from .httpclient import HttpClient
 from .jobs import (
@@ -56,32 +56,19 @@ from .services.analytics import capture_unavailable_metrics
 from .services.approvals import expire_approvals
 from .services.creator_agent.discovery import discover_aihot
 from .services.creator_agent.entry import scheduled_tick
-from .services.drafts import (
-    DraftError,
-    create_draft,
-    drafts_created_today,
-    pending_approval_count,
-    revise_draft,
-)
+from .services.drafts import revise_draft
 from .services.notifications import deliver_pending, queue_outcome, recover_inflight
 from .services.publish import (
     publish_approval,
     record_blocked_approval,
     recover_interrupted_publishes,
 )
-from .services.research import (
-    ensure_research_queue,
-    ingest_source,
-    next_researched_event,
-    recurring_sources,
-    sync_sources,
-)
+from .services.research import sync_sources
 
-from .timeutil import Clock, SystemClock, local_date, parse_iso, to_iso
+from .timeutil import Clock, SystemClock, parse_iso, to_iso
 
 log = get_logger(__name__)
 
-NEXT_COLLECT_KEY = "next_collect_at"
 NEXT_CREATOR_DISCOVERY_KEY = "next_creator_discovery_at"
 
 
@@ -170,13 +157,6 @@ class Worker:
             log.warning("queued %s missing unknown-result reconciliation job(s)", reconcile)
         if stale:
             log.warning("requeued %s stale job lease(s)", stale)
-        # A fresh process must do one collection soon, regardless of when the
-        # previous process last planned its next poll.
-        # 新进程启动后必须尽快采集一次。如果数据库里还没有“下次采集时间”，
-        # 就设成“现在”，让第一轮 tick 立刻安排采集。
-        with self.db.tx() as conn:
-            if get_setting(conn, NEXT_COLLECT_KEY, None) is None:
-                set_setting(conn, NEXT_COLLECT_KEY, to_iso(self.clock.now()), to_iso(self.clock.now()))
         audit(
             self.db,
             "worker",
@@ -192,37 +172,6 @@ class Worker:
             "publisher": self.config.get("publisher.provider"),
             "publisher_error": self.publisher_error,
         }
-
-    def ensure_collect_scheduled(self) -> datetime | None:
-        # 判断“到点采集了吗”。没到点就返回 None；到点就入队一个 collect 任务，
-        # 并计算下一次采集时间。
-        # 去重键用“计划时间”而不是“任务类型”：同一计划时刻只会有一个任务，
-        # 即使 tick 被连续调用多次也不会堆出一串重复采集。
-        # 间隔加随机抖动，避免每天固定整点去打扰来源网站。
-        now = self.clock.now()
-        row = self.db.fetchone("SELECT value FROM settings WHERE key=?", (NEXT_COLLECT_KEY,))
-        raw = None if row is None else str(row["value"])
-        due = parse_iso(raw) if isinstance(raw, str) else None
-        if due is None:
-            due = now
-        if now < due:
-            return None
-        key = f"collect:{to_iso(due)}"
-        enqueue_job(
-            self.db,
-            "collect",
-            key,
-            run_at=now,
-            clock=self.clock,
-            priority=1,
-            max_attempts=4,
-        )
-        interval = max(60, int(self.config.get("limits.poll_interval_seconds", 1800)))
-        jitter = max(0, int(self.config.get("limits.poll_jitter_seconds", 120)))
-        delay = interval + (self.rng.randint(0, jitter) if jitter else 0)
-        with self.db.tx() as conn:
-            set_setting(conn, NEXT_COLLECT_KEY, to_iso(now + timedelta(seconds=delay)), to_iso(now))
-        return now + timedelta(seconds=delay)
 
     def ensure_creator_discovery_scheduled(self) -> datetime | None:
         """Queue one durable V2 discovery job per configured interval.
@@ -290,89 +239,6 @@ class Worker:
         return {"discovered": len(leads), "runs": run_ids}
 
     # -- job handlers ---------------------------------------------------
-    def _handle_collect(self, job) -> dict[str, Any]:
-        # 采集任务：逐个抓取已启用的来源，然后确保研究队列有内容，
-        # 最后看看要不要安排一篇稿子。
-        # 注意：单个来源失败不会让整个任务失败——ingest_source 内部会
-        # 记录该来源的错误并继续，其他来源照常抓。
-        sync_sources(self.db, self.config)
-        results = []
-        # Commissioned topic rows are fetched by their topic job, not by the
-        # recurring collector.  They deliberately have no query in the sources
-        # table, so including them here would abort every collection round.
-        for source in recurring_sources(self.db):
-            results.append(
-                ingest_source(
-                    self.db,
-                    self.config,
-                    self.http,
-                    self.clock,
-                    source,
-                    logger=log,
-                    budget=self.budget,
-                )
-            )
-        ensure_research_queue(self.db, self.config, self.clock)
-        draft_note = self.maybe_enqueue_draft()
-        return {
-            "sources": len(results),
-            "new_items": sum(int(r.get("new_items", 0)) for r in results),
-            "draft": draft_note,
-        }
-
-    def maybe_enqueue_draft(self) -> str:
-        # 三道限额，任何一道满了就不排新稿：
-        #   1. 今天已经创建的草稿数；
-        #   2. 当前待审批的草稿数（避免一次堆太多让用户烦）；
-        #   3. 是否有已经研究完、等着写的事件。
-        # 返回一句人类可读的说明，会写进任务结果的 draft 字段。
-        if drafts_created_today(self.db, self.config, self.clock, manual=False) >= int(
-            self.config.get("limits.max_drafts_per_day", 1)
-        ):
-            return "daily draft limit reached"
-        if pending_approval_count(self.db) >= int(self.config.get("limits.max_pending_approvals", 3)):
-            return "pending approval limit reached"
-        event = next_researched_event(self.db)
-        if event is None:
-            return "no researched topic waiting"
-        key = f"draft:{local_date(self.clock.now(), self.config.timezone_name)}"
-        enqueue_job(
-            self.db,
-            "draft",
-            key,
-            payload={"event_id": int(event["id"])},
-            clock=self.clock,
-            priority=3,
-            max_attempts=2,
-        )
-        return f"queued event #{event['id']}"
-
-    def _handle_draft(self, job) -> dict[str, Any]:
-        payload = job_payload(job)
-        try:
-            result = create_draft(
-                self.db,
-                self.config,
-                self.clock,
-                self.llm,
-                event_id=payload.get("event_id"),
-            )
-        except DraftError as exc:
-            # Limits, evidence and validation problems are policy outcomes, not
-            # transient failures; retrying would manufacture a draft.
-            # 这些是“规则不允许”，不是“网络抽风”。重试只会重复打印同样的
-            # 错误，甚至强行造出一篇不合格的稿子，所以直接跳过。
-            return {"skipped": str(exc)}
-        try:
-            delivered = deliver_pending(self.db, self.config, self.clock, self.notifier)
-        except NotConfigured as exc:
-            delivered = [{"ok": False, "error": str(exc)}]
-        return {
-            "draft_id": result["draft"]["id"],
-            "approval_code": result["approval_code"],
-            "notifications": delivered,
-        }
-
     def _handle_creator_agent(self, job) -> dict[str, Any]:
         # V2: the model-driven loop runs here, never in the Feishu callback.
         # The runtime creates a real pending approval only at submit time.
@@ -608,30 +474,114 @@ class Worker:
 
     # -- one tick -------------------------------------------------------
     def tick(self, *, limit: int = 20) -> dict[str, Any]:
-        # 一轮完整循环。即使某一轮没有任务，也会正常返回一个汇总字典。
-        # 顺序：先做“到期的杂务”（采集排期、审批过期、通知投递），
-        # 再跑任务队列，最后补记指标。
+        # =====================================================================
+        # tick = “脉搏跳一次”
+        # =====================================================================
+        # worker 常驻进程大约每 30 秒调用一次 tick()。
+        # 每一轮都从“数据库 + 当前时间”重新出发，把到期的事情做一遍，
+        # 做完返回一张“成绩单”（字典），然后去休息，等下一轮。
+        #
+        # 这种“每轮都重新读数据库”的写法叫幂等设计：
+        # 进程什么时候被杀掉都没关系，重启后的下一轮照样接着干，
+        # 不需要把进度小心翼翼地保存在内存里。
+        #
+        # 参数说明（零基础版）：
+        #   *            表示后面的参数只能“写名字”传：tick(limit=5)。
+        #                不许写 tick(5)，这样读代码的人不会搞混 5 代表什么。
+        #   limit=20     默认值：这一轮最多执行 20 条任务。
+        #   -> dict[str, Any]
+        #                类型提示：返回一个字典，键是字符串，值是任意类型。
+        #                它只是“说明书”，Python 运行时并不会强制检查。
+        #
+        # 本轮顺序（顺序有讲究，不能乱）：
+        #   1. 确认数据库结构是最新的
+        #   2. 看看“每日选题发现”到点没有，到点就排进任务队列
+        #   3. 把过期没人处理的审批单关掉
+        #   4. 把队列里还没发出去的通知发掉
+        #   5. 从任务队列领任务并执行（选题发现 / 创作 / 发布 / 修改……）
+        #   6. 给已发布的帖子补记“指标暂缺”
+        # =====================================================================
+
         self.db.init()
+        # 第 1 步：数据库“开机自检”。
+        # 第一次运行会建目录、建表；以后每次运行会对比 schema.py 里的版本号，
+        # 只执行还没跑过的升级脚本（所以旧数据库能自动升级）。
+        # 重复调用是安全的（幂等），所以放在每轮开头最省心。
+
         self.ensure_creator_discovery_scheduled()
+        # 第 2 步：安排“每日选题发现”。
+        # 内部逻辑：
+        #   - 功能没开或还没到点 -> 返回 None，什么都不做；
+        #   - 到点了 -> 往 jobs 表插入一条 creator_discovery 任务，
+        #     并把“下次时间”往后推一个间隔。
+        # 注意：这里只是“排队”，不是立刻执行；真正执行在第 5 步。
+        # 好处是任务先落盘——进程就算马上崩溃，重启后任务还在队列里。
+
         expired = expire_approvals(self.db, self.clock)
+        # 第 3 步：关掉过期审批单。
+        # 一张审批单有有效期，过期后：
+        #   - 还没批的 -> 作废，避免拿旧稿去发；
+        #   - 已经批了、但错过计划发布时间的 -> 也作废，
+        #     因为你批准的是“那个时间点的那篇内容”，不能拿旧批准去发。
+        # 返回值 expired：这一轮作废了几张单子（整数）。
+
         try:
             delivered = deliver_pending(self.db, self.config, self.clock, self.notifier)
         except NotConfigured as exc:
+            # 第 4 步：发送积压的通知（比如飞书审批消息）。
+            # deliver_pending 逐条处理队列里的通知：发成功记 sent，
+            # 发失败记 retry/failed，留到下一轮再试。
+            #
+            # 为什么包 try/except？
+            # 演示模式或没配置飞书凭据时，发送会抛 NotConfigured。
+            # 这不是程序坏了，只是“今天没有邮差”。
+            # 捕获它以后本轮继续往下跑，错误写进成绩单方便排查。
             delivered = [{"ok": False, "error": str(exc)}]
+            # delivered 是一个列表，每项记录一条通知的发送结果。
+
         jobs = run_due_jobs(
-            self.db,
-            self.clock,
-            self.handlers(),
+            self.db,           # 数据库：任务队列就存在这里
+            self.clock,        # 时钟：判断任务“到点没有”；测试时可冻结时间
+            self.handlers(),   # “任务类型 -> 处理函数”的对照表
+            #   队列里的任务只存一个 kind 字符串（例如 "revise"），
+            #   run_due_jobs 靠这张表找到该调用哪个函数。
+            #   handlers() 返回的对应关系：
+            #     creator_discovery  -> _handle_creator_discovery
+            #     creator_agent_run  -> _handle_creator_agent
+            #     publication_agent  -> _handle_publication_agent
+            #     revise             -> _handle_revise
+            #     publish            -> _handle_publish
             worker=f"worker-{self.clock.now().timestamp():.0f}",
+            # 领任务时的“工号”，例如 worker-1760000000。
+            # timestamp() 是秒级时间戳；:.0f 表示“不要小数点”。
+            # 用途：任务是“租”出去的，工号用来区分是谁领走的；
+            # 进程挂掉以后，别的进程能认出过期租约并把任务回收。
             limit=limit,
+            # 本轮最多执行多少条任务；默认 20 条。
         )
+        # 第 5 步：真正干活。
+        # run_due_jobs 内部循环：领一条任务 -> 调用对应函数 -> 记录结果。
+        # 关键设计：每条任务的异常被单独捕获，
+        # 一条任务失败不会拖垮整轮，也不影响后面的任务。
+        # jobs 是结果列表，例如：
+        #   [{"job_id": 3, "kind": "revise", "state": "done"}]
+
         metrics = capture_unavailable_metrics(self.db, self.clock)
+        # 第 6 步（收尾）：给“已发布”的帖子补一条“指标暂缺”快照。
+        # 为什么要先写一条“缺”？
+        # 因为“我们没去采集”和“采集了但平台没给数据”必须能区分开。
+        # 以后真正的采集器可以用 record_metrics 覆盖这一行。
+        # 返回值 metrics：本轮补记了几条记录（整数）。
+
         return {
-            "expired": expired,
-            "notifications": delivered,
-            "jobs": jobs,
-            "metrics_recorded_missing": metrics,
+            "expired": expired,                    # 本轮作废的审批单数量
+            "notifications": delivered,            # 通知发送结果列表
+            "jobs": jobs,                          # 任务执行结果列表
+            "metrics_recorded_missing": metrics,   # 本轮补记的缺失指标条数
         }
+        # 返回“成绩单”而不是直接打印，好处有两个：
+        #   1. run_forever 里统一写日志：log.info("tick: %s", summary)；
+        #   2. 测试可以直接检查字典里的数字，不用去解析日志文本。
 
     def run_forever(self, *, stop_after: int | None = None) -> None:
         # 常驻模式。用 signal 捕获 Ctrl+C / 终止信号，让循环优雅退出：
@@ -652,15 +602,36 @@ class Worker:
                 pass
         log.info("worker started; mode=%s demo=%s", self.config.mode, self.config.demo_pipeline)
         ticks = 0
+        last_log_at = 0.0
         try:
             while not stop["flag"]:
                 summary = self.tick()
-                log.info("tick: %s", summary)
+                if summary.get("jobs"):
+                    # Flush any notifications queued by the jobs that just finished
+                    # right away instead of waiting for the next sleep cycle.
+                    try:
+                        extra_delivered = deliver_pending(
+                            self.db, self.config, self.clock, self.notifier
+                        )
+                        if extra_delivered:
+                            summary["notifications"] = list(summary.get("notifications") or []) + list(extra_delivered)
+                    except NotConfigured:
+                        pass
+                now_mono = time.monotonic()
+                has_activity = bool(
+                    summary.get("expired")
+                    or summary.get("notifications")
+                    or summary.get("jobs")
+                    or summary.get("metrics_recorded_missing")
+                )
+                if has_activity or (now_mono - last_log_at >= 30.0) or stop_after is not None:
+                    log.info("tick: %s", summary)
+                    last_log_at = now_mono
                 ticks += 1
                 if stop_after is not None and ticks >= stop_after:
                     break
-                # Wake regularly so approvals and jobs become due on time.
-                deadline = time.monotonic() + 30
+                # Wake every 2s so approvals, notifications and jobs respond quickly.
+                deadline = time.monotonic() + 2.0
                 while not stop["flag"] and time.monotonic() < deadline:
                     time.sleep(0.5)
         finally:

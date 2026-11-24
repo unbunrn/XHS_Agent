@@ -387,12 +387,18 @@ class LivePublicationRuntime:
         text = str(text or "").strip()
         if not text:
             return 0
+        row = self.db.fetchone(
+            "SELECT MAX(seq) AS seq FROM publication_agent_steps "
+            "WHERE task_id=? AND action='batch_start'",
+            (int(task.id),),
+        )
+        batch = int(row["seq"] or 0) if row is not None else 0
         return notifications.queue_outcome(
             self.db,
             self.config,
             self.clock,
             text,
-            dedupe_key=f"publication:{task.id}:{_digest(text)}",
+            dedupe_key=f"publication:{task.id}:batch:{batch}:{_digest(text)}",
         )
 
     def schedule(

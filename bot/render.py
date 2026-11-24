@@ -62,9 +62,11 @@ class RenderedImage:
     width: int
     height: int
     kind: str = "card"
+    theme: str = ""
+    palette: str = ""
 
     def as_dict(self) -> dict:
-        return {
+        data = {
             "ordinal": self.ordinal,
             "path": str(self.path),
             "sha256": self.sha256,
@@ -72,6 +74,11 @@ class RenderedImage:
             "height": self.height,
             "kind": self.kind,
         }
+        if self.theme:
+            data["theme"] = self.theme
+        if self.palette:
+            data["palette"] = self.palette
+        return data
 
 
 BG = (247, 244, 238)
@@ -305,12 +312,41 @@ def render_draft(
     out_dir: str | Path,
     config: Config,
     draft_key: str,
+    db: object = None,
+    theme: str | None = None,
+    run_key: str | None = None,
 ) -> list[RenderedImage]:
     """Render one or more PNG cards.  Raises on overflow instead of truncating."""
     # New drafts carry an independent storyboard.  Each card becomes exactly one
     # PNG; the caption is never flowed into images.  Legacy drafts keep the old
     # deterministic section rendering so immutable approvals are unchanged.
     if content.storyboard is not None:
+        engine = str(config.get("render.engine", "html") or "html").strip().lower()
+        fallback = str(config.get("render.fallback_engine", "pillow") or "pillow").strip().lower()
+        if engine == "html":
+            import logging
+
+            from .visual.engine import BrowserLaunchError, render_storyboard_html
+
+            try:
+                return render_storyboard_html(
+                    content,
+                    out_dir=out_dir,
+                    config=config,
+                    draft_key=draft_key,
+                    db=db,
+                    theme_override=theme,
+                    run_key=run_key,
+                )
+            except BrowserLaunchError as exc:
+                if fallback == "pillow":
+                    logging.getLogger(__name__).warning(
+                        "HTML renderer unavailable (%s); falling back to Pillow", exc
+                    )
+                    return _render_storyboard(
+                        content, out_dir=out_dir, config=config, draft_key=draft_key
+                    )
+                raise
         return _render_storyboard(content, out_dir=out_dir, config=config, draft_key=draft_key)
     if Image is None or ImageDraw is None:
         raise RenderError("Pillow is not installed; PNG rendering is unavailable")
@@ -449,16 +485,20 @@ def _draw_storyboard_frame(
         fill=MUTED,
     )
     draw.line([(margin, margin + 40), (width - margin, margin + 40)], fill=RULE, width=2)
-    draw.line(
-        [(margin, height - margin - 24), (width - margin, height - margin - 24)],
-        fill=RULE,
-        width=2,
-    )
-    footer = (
-        "公开资料整理，未做个人实测 · "
-        + local_iso(datetime.now(timezone.utc), config.timezone_name)[:10]
-    )
-    draw.text((margin, height - margin - 4), footer, font=fonts.meta, fill=MUTED)
+    footer_disclaimer = str(
+        config.get("render.footer_disclaimer", "last") or "last"
+    ).strip().lower()
+    if footer_disclaimer == "every" or (footer_disclaimer == "last" and page == total):
+        draw.line(
+            [(margin, height - margin - 24), (width - margin, height - margin - 24)],
+            fill=RULE,
+            width=2,
+        )
+        footer = (
+            "公开资料整理，未做个人实测 · "
+            + local_iso(datetime.now(timezone.utc), config.timezone_name)[:10]
+        )
+        draw.text((margin, height - margin - 4), footer, font=fonts.meta, fill=MUTED)
 
 
 def _render_storyboard(
@@ -566,6 +606,121 @@ def _render_storyboard(
                 y = _draw_annotated_card(
                     draw, card, x=margin, y=y + 10, width=inner, fonts=fonts
                 )
+            elif layout in {"stat", "quote", "timeline", "checklist", "qa"}:
+                h_font = getattr(fonts, "title", None) or getattr(fonts, "h1", None) or fonts.meta
+                h2_font = getattr(fonts, "h2", None) or getattr(fonts, "subhead", None) or h_font
+                b_font = getattr(fonts, "body", None) or getattr(fonts, "regular", None) or fonts.meta
+                y = margin + 104
+                max_w = width - 2 * margin
+                max_y = height - margin - 52
+
+                def _wrap_text(txt: str, font_obj, limit_w: int) -> list[str]:
+                    lines_out: list[str] = []
+                    for para in str(txt or "").splitlines():
+                        cur = ""
+                        for ch in para:
+                            probe = cur + ch
+                            if cur and draw.textlength(probe, font=font_obj) > limit_w:
+                                lines_out.append(cur)
+                                cur = ch
+                            else:
+                                cur = probe
+                        if cur:
+                            lines_out.append(cur)
+                    return lines_out or [""]
+
+                if card.kicker:
+                    draw.text((margin, y), str(card.kicker), font=fonts.meta, fill="#B8361F")
+                    y += 40
+                for hl in _wrap_text(card.headline, h_font, max_w):
+                    draw.text((margin, y), hl, font=h_font, fill="#1B1A17")
+                    y += 58
+                y += 18
+
+                if layout == "stat":
+                    stats = list(card.stats or [])[:3]
+                    for st in stats:
+                        if y + 180 > max_y:
+                            raise RenderError("stat card overflows in Pillow fallback")
+                        draw.rounded_rectangle(
+                            [(margin, y), (width - margin, y + 168)],
+                            radius=14,
+                            fill="#FFFFFF",
+                            outline=RULE,
+                            width=2,
+                        )
+                        val_txt = f"{st.get('value', '')}{st.get('unit', '')}"
+                        draw.text((margin + 28, y + 22), val_txt, font=h_font, fill="#B8361F")
+                        lbl_txt = str(st.get("label", ""))
+                        draw.text((margin + 28, y + 96), lbl_txt, font=b_font, fill="#1B1A17")
+                        y += 192
+                elif layout == "quote":
+                    draw.rounded_rectangle(
+                        [(margin, y), (width - margin, max_y - 40)],
+                        radius=14,
+                        fill="#FFFFFF",
+                        outline=RULE,
+                        width=2,
+                    )
+                    qy = y + 36
+                    draw.text((margin + 28, qy), "“", font=h_font, fill="#B8361F")
+                    qy += 64
+                    for ql in _wrap_text(card.subhead, h2_font, max_w - 64):
+                        if qy + 48 > max_y - 96:
+                            raise RenderError("quote card overflows in Pillow fallback")
+                        draw.text((margin + 32, qy), ql, font=h2_font, fill="#1B1A17")
+                        qy += 48
+                    if card.attribution:
+                        draw.text(
+                            (margin + 32, min(max_y - 92, qy + 24)),
+                            f"—— {card.attribution}",
+                            font=fonts.meta,
+                            fill=MUTED,
+                        )
+                elif layout == "checklist":
+                    cols = list(card.columns or [])[:2]
+                    col_w = (max_w - 28) // 2
+                    for idx, col in enumerate(cols):
+                        cx = margin + idx * (col_w + 28)
+                        draw.rounded_rectangle(
+                            [(cx, y), (cx + col_w, max_y - 24)],
+                            radius=14,
+                            fill="#FFFFFF",
+                            outline="#B8361F" if idx == 0 else RULE,
+                            width=2,
+                        )
+                        prefix = "✓ " if idx == 0 else "✗ "
+                        draw.text(
+                            (cx + 22, y + 22),
+                            f"{prefix}{col.label}",
+                            font=h2_font,
+                            fill="#B8361F" if idx == 0 else "#1B1A17",
+                        )
+                        cy = y + 84
+                        for bl in _wrap_text(col.text, b_font, col_w - 44):
+                            if cy + 40 > max_y - 44:
+                                raise RenderError("checklist card overflows in Pillow fallback")
+                            draw.text((cx + 22, cy), bl, font=b_font, fill="#1B1A17")
+                            cy += 42
+                else:
+                    # timeline and qa
+                    for pt in card.points:
+                        lines_pt = _wrap_text(pt, b_font, max_w - 56)
+                        box_h = 36 + len(lines_pt) * 42
+                        if y + box_h > max_y:
+                            raise RenderError(f"{layout} card overflows in Pillow fallback")
+                        draw.rounded_rectangle(
+                            [(margin, y), (width - margin, y + box_h)],
+                            radius=12,
+                            fill="#FFFFFF",
+                            outline=RULE,
+                            width=2,
+                        )
+                        py = y + 18
+                        for line_pt in lines_pt:
+                            draw.text((margin + 28, py), line_pt, font=b_font, fill="#1B1A17")
+                            py += 42
+                        y += box_h + 18
             else:
                 raise RenderError(f"unsupported storyboard layout: {layout}")
             if card.note:

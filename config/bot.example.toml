@@ -91,7 +91,7 @@ max_revision_steps = 6
 max_review_cycles = 2
 max_searches = 5
 max_physical_fetches = 6
-max_model_calls = 14
+max_model_calls = 16
 max_invalid_decisions = 2
 max_no_progress_steps = 2
 max_run_seconds = 600
@@ -110,22 +110,16 @@ semantic_review = false
 [topics]
 # 每个本地自然日最多接受的选题请求数；按历史记录计数，不因服务重启清零。
 max_per_day = 5
-# 旧的单轮“模型补域名”路径保留用于历史配置；当前 S2 使用一次结构化
-# 研究计划和一次批量来源身份判定，两者共享下方抓取/预算上限。
+# 旧的单轮“模型补域名”路径保留用于历史配置；当前 S2 使用一次批量
+# 来源身份判定，仍共享下方抓取/预算上限。
 model_source_review = false
 model_source_min_confidence = 0.7
 model_source_max_domains = 3
 model_source_max_output_tokens = 500
-model_plan = true
-model_plan_max_output_tokens = 700
 model_identity = true
 identity_max_output_tokens = 1800
 identity_cache_hours = 24
 identity_min_confidence = 0.6
-# P0 adaptive research：首轮计划后最多补 2 个检索式（官方源/独立来源/
-# 关键数字/反方覆盖）；只增加观察，不降低正文、时效、来源身份或审批门槛。
-adaptive_research = false
-adaptive_max_queries = 2
 # 写稿因“证据不足”拒绝时做一次有界补检；默认关闭，补检仍受来源/时效/身份/预算约束。
 auto_rescue = false
 rescue_max_fetch = 2
@@ -157,6 +151,8 @@ input_usd_per_million = 0.30
 output_usd_per_million = 1.20
 reserve_unknown_usd = 0.005
 max_output_tokens = 1800
+# 修改稿在父稿基础上追加内容，输出通常更长；单独给修订 writer 更高上限。
+revision_max_output_tokens = 2600
 
 # 【模型】DeepSeek 的 key 从 DEEPSEEK_API_KEY 或 secrets.toml 读取。
 [llm]
@@ -169,6 +165,27 @@ temperature = 0.5
 # Short JSON drafts: explicitly disable thinking so max_tokens is not consumed
 # by reasoning. The official API default is thinking enabled.
 thinking_disabled = true
+
+[llm.purposes.draft]
+temperature = 0.85
+
+[llm.purposes.revise]
+temperature = 0.8
+
+[llm.purposes.polish]
+temperature = 0.9
+
+[llm.purposes.review]
+temperature = 0.2
+
+[llm.purposes.draft_review]
+temperature = 0.2
+
+[llm.purposes.visual_review]
+temperature = 0.2
+
+[llm.purposes.creator_agent]
+temperature = 0.3
 
 # 【通知】lark = 飞书。需要应用凭据和 owner 的 open_id。
 [notify]
@@ -226,20 +243,36 @@ port = 8765
 session_ttl_minutes = 120
 allow_non_loopback = false
 
-# 【配图】卡片尺寸、中文字体回退列表、最多几张。超限报错，不截断。
+# 【配图】HTML/Edge 主引擎与 Pillow 回退、主题轮换与卡片尺寸。超限报错，不截断。
 [render]
 width = 1080
 height = 1440
 margin = 72
+engine = "html"
+fallback_engine = "pillow"
+browser_channel = "msedge"
+browser_executable = ""
+theme_cooldown = 2
+footer_disclaimer = "last"
+card_timeout_ms = 15000
+font_dirs = ["assets/fonts", "C:/Windows/Fonts"]
+max_blank_band = 0.34
+cover_min_distance = 12
 title_font = "C:/Windows/Fonts/msyhbd.ttc"
 body_font = "C:/Windows/Fonts/msyh.ttc"
 fallback_fonts = ["C:/Windows/Fonts/simhei.ttf", "C:/Windows/Fonts/Deng.ttf"]
 max_cards = 6
 
-# 【写作】标题和正文的长度上限。
+# 【写作】标题/正文长度上限、人设 voice 配置与可选单轮文风润色。
 [writer]
 title_max_chars = 20
 body_max_chars = 1000
+voice_path = "config/voice.toml"
+style_polish = true
+
+# 【排版】中文标点规整。默认保留半角波浪号。
+[typography]
+fullwidth_tilde = false
 
 # 【读者】目标读者画像，写稿时作为语气和深度依据。
 [audience]

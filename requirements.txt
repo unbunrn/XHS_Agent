@@ -7,3 +7,6 @@
 # Feishu delivery, so it is included here and installed into an ordinary venv.
 Pillow==12.3.0
 lark-oapi==1.7.2
+# Playwright Python bindings only (do NOT run `playwright install`; renders via
+# local Microsoft Edge `channel="msedge"` when `render.engine = "html"`).
+playwright==1.65.2

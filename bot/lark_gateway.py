@@ -181,6 +181,17 @@ class LarkLongConnection:
                 if key in result
             }
             self._log.info("lark message outcome: %s", safe)
+            try:
+                from .adapters.notify import build_notifier
+                from .services.notifications import deliver_pending
+
+                notifier = getattr(self, "_notifier", None)
+                if notifier is None:
+                    notifier = build_notifier(self.config, self.clock)
+                    self._notifier = notifier
+                deliver_pending(self.db, self.config, self.clock, notifier)
+            except Exception as notify_exc:  # noqa: BLE001 - worker will retry pending notifications
+                self._log.debug("immediate notification flush skipped: %s", type(notify_exc).__name__)
         except Exception as exc:  # noqa: BLE001 - callback must never crash the SDK loop
             self._log.error("lark message handling failed: %s", type(exc).__name__)
 

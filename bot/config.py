@@ -123,7 +123,7 @@ DEFAULTS: dict[str, Any] = {
         "max_review_cycles": 2,
         "max_searches": 5,
         "max_physical_fetches": 6,
-        "max_model_calls": 14,
+        "max_model_calls": 16,
         "max_invalid_decisions": 2,
         "max_no_progress_steps": 2,
         "max_run_seconds": 600,
@@ -190,6 +190,15 @@ DEFAULTS: dict[str, Any] = {
         "timeout_seconds": 60,
         "max_retries": 2,
         "temperature": 0.5,
+        "purposes": {
+            "draft": {"temperature": 0.85},
+            "revise": {"temperature": 0.8},
+            "polish": {"temperature": 0.9},
+            "review": {"temperature": 0.2},
+            "draft_review": {"temperature": 0.2},
+            "visual_review": {"temperature": 0.2},
+            "creator_agent": {"temperature": 0.3},
+        },
         # Short JSON drafts do not need reasoning tokens; disabling thinking
         # keeps the output bounded and avoids finish_reason=length surprises.
         "thinking_disabled": True,
@@ -239,12 +248,21 @@ DEFAULTS: dict[str, Any] = {
         "session_ttl_minutes": 120,
         "allow_non_loopback": False,
     },
-    # render：PNG 卡片尺寸与字体。Windows 自带微软雅黑，路径写死在这里；
-    # 换机器时如果找不到字体，fallback_fonts 会依次尝试。
+    # render：PNG 卡片尺寸、HTML/Edge 主引擎与 Pillow 回退字体配置。
     "render": {
         "width": 1080,
         "height": 1440,
         "margin": 72,
+        "engine": "html",  # html | pillow
+        "fallback_engine": "pillow",  # pillow | none
+        "browser_channel": "msedge",
+        "browser_executable": "",
+        "theme_cooldown": 2,
+        "footer_disclaimer": "last",  # last | every | none
+        "card_timeout_ms": 15000,
+        "font_dirs": ["assets/fonts", "C:/Windows/Fonts"],
+        "max_blank_band": 0.34,
+        "cover_min_distance": 12,
         "title_font": "C:/Windows/Fonts/msyhbd.ttc",
         "body_font": "C:/Windows/Fonts/msyh.ttc",
         "fallback_fonts": [
@@ -267,6 +285,8 @@ DEFAULTS: dict[str, Any] = {
         # generation; per-post instructions and webpage text are never written
         # into it automatically.
         "editorial_profile_path": "config/editorial-profile.toml",
+        "voice_path": "config/voice.toml",
+        "style_polish": True,
         "banned_phrases": [
             "我亲测",
             "我实测",
@@ -277,6 +297,10 @@ DEFAULTS: dict[str, Any] = {
             "包赚",
             "内部消息",
         ],
+    },
+    # typography：中文排版标点规整。默认保留半角 ~ 与英文词距规则。
+    "typography": {
+        "fullwidth_tilde": False,
     },
     # topics：手机飞书“选题/写一篇”请求的独立护栏。
     # 它与 limits.max_drafts_per_day 相互独立：选题请求的数量上限控制的是
@@ -301,19 +325,11 @@ DEFAULTS: dict[str, Any] = {
         "model_source_min_confidence": 0.7,
         "model_source_max_domains": 3,
         "model_source_max_output_tokens": 500,
-        # S2: one compact planning call (entities/versions/queries) and one
-        # batch source-identity judge over actually fetched material.
-        "model_plan": True,
-        "model_plan_max_output_tokens": 700,
+        # S2: one batch source-identity judge over actually fetched material.
         "model_identity": True,
         "identity_max_output_tokens": 1800,
         "identity_cache_hours": 24,
         "identity_min_confidence": 0.6,
-        # P0 adaptive loop: after the first bounded plan, detect concrete
-        # coverage gaps and run at most two follow-up searches.  It cannot
-        # bypass body/topic/date/identity gates; default off for old installs.
-        "adaptive_research": False,
-        "adaptive_max_queries": 2,
         # One bounded evidence-gap rescue when the writer refuses for thin
         # evidence.  Its separate physical budget is small and auditable; it
         # still uses the normal body/date/identity gates.

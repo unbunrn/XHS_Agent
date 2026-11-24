@@ -55,6 +55,7 @@ from typing import Any
 
 from .adapters.types import LLMOutputError
 from .config import Config
+from .typography import normalize_zh
 
 SECTION_HEADINGS = {
     "what": "发生了什么",
@@ -75,9 +76,31 @@ IMAGE_LAYOUTS = {
     "diagram",
     "argument",
     "annotated",
+    "stat",
+    "quote",
+    "timeline",
+    "checklist",
+    "qa",
 }
 CONTENT_LAYOUTS = IMAGE_LAYOUTS - {"cover"}
+COVER_VARIANTS = {"headline", "stat", "quote", "question", "split"}
+VISUAL_THEMES = {"editorial", "swiss", "terminal", "newsprint", "notebook", "poster"}
+ALLOWED_ICONS = frozenset({
+    "sparkles", "cpu", "terminal", "code", "database", "layers", "zap", "shield",
+    "check-circle", "alert-triangle", "clock", "calendar", "trending-up", "bar-chart",
+    "quote", "book-open", "file-text", "search", "lightbulb", "rocket", "compass",
+    "wrench", "git-branch", "message-square", "users", "user", "globe", "lock",
+    "key", "eye", "target", "flag", "arrow-right", "chevron-right", "plus", "minus",
+    "info", "help-circle", "award", "scale",
+})
 EDITORIAL_STRATEGIES = {"image_led", "caption_led", "balanced"}
+_TIMELINE_DATE_RE = re.compile(
+    r"^(?:\d{4}(?:年\d{1,2}月?(?:\d{1,2}[日号]?)?|[./-]\d{1,2}(?:[./-]\d{1,2})?)?"
+    r"|\d{1,2}(?:月(?:\d{1,2}[日号]?)?|[./-]\d{1,2})"
+    r"|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,4}"
+    r"|Q[1-4](?:\s*\d{4})?)",
+    re.I,
+)
 # A process layout is only appropriate when the source actually describes a
 # sequence.  The renderer therefore draws numbered steps without arrowheads; a
 # memory architecture must not be turned into a fake pipeline just to fit a card.
@@ -183,19 +206,31 @@ class ImageCard:
     columns: list[ImageColumn] = field(default_factory=list)
     note: str = ""
     evidence_ids: list[str] = field(default_factory=list)
+    variant: str = "headline"
+    stats: list[dict[str, str]] = field(default_factory=list)
+    attribution: str = ""
+    emphasis: list[str] = field(default_factory=list)
+    icon: str = ""
 
     def text_parts(self) -> list[str]:
-        parts = [self.headline, self.kicker, self.subhead, self.note]
+        parts = [self.headline, self.kicker, self.subhead, self.note, self.attribution]
         parts.extend(self.points)
         for column in self.columns:
             parts.extend([column.label, column.text])
+        for stat in self.stats:
+            if isinstance(stat, dict):
+                parts.extend([
+                    str(stat.get("value", "")),
+                    str(stat.get("unit", "")),
+                    str(stat.get("label", "")),
+                ])
         return [part for part in parts if part]
 
     def text(self) -> str:
         return " ".join(self.text_parts())
 
     def as_dict(self) -> dict:
-        return {
+        data: dict[str, Any] = {
             "layout": self.layout,
             "headline": self.headline,
             "kicker": self.kicker,
@@ -205,6 +240,19 @@ class ImageCard:
             "note": self.note,
             "evidence_ids": list(self.evidence_ids),
         }
+        if self.variant and self.variant != "headline":
+            data["variant"] = self.variant
+        elif self.layout == "cover":
+            data["variant"] = self.variant or "headline"
+        if self.stats:
+            data["stats"] = [dict(s) for s in self.stats]
+        if self.attribution:
+            data["attribution"] = self.attribution
+        if self.emphasis:
+            data["emphasis"] = list(self.emphasis)
+        if self.icon:
+            data["icon"] = self.icon
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "ImageCard":
@@ -213,6 +261,17 @@ class ImageCard:
             for item in data.get("columns", [])
             if isinstance(item, dict)
         ]
+        raw_stats = data.get("stats") or []
+        stats = [
+            {
+                "value": str(item.get("value", "")),
+                "unit": str(item.get("unit", "")),
+                "label": str(item.get("label", "")),
+            }
+            for item in raw_stats
+            if isinstance(item, dict)
+        ]
+        raw_variant = str(data.get("variant") or ("headline" if data.get("layout") == "cover" else "")).strip()
         return cls(
             layout=str(data.get("layout", "")),
             headline=str(data.get("headline", "")),
@@ -222,6 +281,11 @@ class ImageCard:
             columns=columns,
             note=str(data.get("note", "")),
             evidence_ids=[str(item) for item in data.get("evidence_ids", [])],
+            variant=raw_variant or "headline",
+            stats=stats,
+            attribution=str(data.get("attribution", "")),
+            emphasis=[str(item) for item in (data.get("emphasis") or []) if str(item).strip()],
+            icon=str(data.get("icon", "")),
         )
 
 
@@ -272,9 +336,11 @@ class EditorialPlan:
     rationale: str
     strategy: str = ""
     visual_approach: str = ""
+    opening_move: str = ""
+    visual_theme: str = ""
 
     def as_dict(self) -> dict:
-        return {
+        data = {
             "audience_need": self.audience_need,
             "angle": self.angle,
             "takeaway": self.takeaway,
@@ -283,6 +349,11 @@ class EditorialPlan:
             "strategy": self.strategy,
             "visual_approach": self.visual_approach,
         }
+        if self.opening_move:
+            data["opening_move"] = self.opening_move
+        if self.visual_theme:
+            data["visual_theme"] = self.visual_theme
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "EditorialPlan":
@@ -296,6 +367,8 @@ class EditorialPlan:
             rationale=str(data.get("rationale", "")),
             strategy=str(data.get("strategy", "")),
             visual_approach=str(data.get("visual_approach", "")),
+            opening_move=str(data.get("opening_move", "")),
+            visual_theme=str(data.get("visual_theme", "")),
         )
 
 
@@ -545,7 +618,8 @@ def validate_draft_payload(
     # 不会进入审批，更不会发布。
     if not isinstance(payload, dict):
         raise LLMOutputError("writer output must be a JSON object")
-    title = _clean_line(payload.get("title"), "title")
+    fullwidth_tilde = bool(config.get("typography.fullwidth_tilde", True))
+    title = _clean_line(payload.get("title"), "title", fullwidth_tilde=fullwidth_tilde)
     title_max = int(config.get("writer.title_max_chars", 20))
     title = _fit_title(title, title_max)
     if "\n" in title:
@@ -574,7 +648,7 @@ def validate_draft_payload(
             raise LLMOutputError("caption must be a non-empty list of paragraphs")
         if len(raw_caption) > 8:
             raise LLMOutputError("caption has too many paragraphs")
-        caption = [_clean_paragraph(item) for item in raw_caption]
+        caption = [_clean_paragraph(item, fullwidth_tilde=fullwidth_tilde) for item in raw_caption]
         caption = [item for item in caption if item]
         if not caption:
             raise LLMOutputError("caption has no usable paragraphs")
@@ -584,7 +658,7 @@ def validate_draft_payload(
         if not isinstance(raw_plan, dict):
             raise LLMOutputError("editorial_plan is required for a new draft")
         editorial_plan = _validate_editorial_plan(raw_plan)
-        claims = _validate_claims(payload.get("claims"), evidence_by_id)
+        claims = _validate_claims(payload.get("claims"), evidence_by_id, fullwidth_tilde=fullwidth_tilde)
         storyboard = _validate_storyboard(
             payload.get("storyboard"),
             evidence_by_id=evidence_by_id,
@@ -769,7 +843,11 @@ def _validate_editorial_plan(raw: dict) -> EditorialPlan:
         raise LLMOutputError("editorial_plan.caption_image_division is too long")
     if len(fields["visual_approach"]) > 120:
         raise LLMOutputError("editorial_plan.visual_approach is too long")
-    return EditorialPlan(**fields, strategy=strategy)
+    # Optional aesthetic fields: silent downgrade if unknown or overly long
+    opening_move = _clean_paragraph(raw.get("opening_move"))[:40]
+    raw_theme = _clean_paragraph(raw.get("visual_theme")).lower()[:40]
+    visual_theme = raw_theme if raw_theme in VISUAL_THEMES else ""
+    return EditorialPlan(**fields, strategy=strategy, opening_move=opening_move, visual_theme=visual_theme)
 
 
 def _validate_card(
@@ -779,7 +857,9 @@ def _validate_card(
     evidence_by_id: dict[str, dict],
     claims: list[Claim],
     allow_cover: bool,
+    config: Config | None = None,
 ) -> ImageCard:
+    fullwidth_tilde = bool(config.get("typography.fullwidth_tilde", True)) if config is not None else True
     if not isinstance(raw, dict):
         raise LLMOutputError(f"{label} must be an object")
     layout = str(raw.get("layout", "")).strip()
@@ -789,19 +869,22 @@ def _validate_card(
         raise LLMOutputError("storyboard cover must use layout 'cover'")
     if not allow_cover and layout == "cover":
         raise LLMOutputError("content card cannot use layout 'cover'")
-    headline = _clean_line(raw.get("headline"), f"{label}.headline")
-    kicker = _clean_paragraph(raw.get("kicker"))
-    subhead = _clean_paragraph(raw.get("subhead"))
-    note = _clean_paragraph(raw.get("note"))
-    points = [_clean_paragraph(item) for item in (raw.get("points") or [])]
+    if allow_cover:
+        headline = _clean_headline(raw.get("headline"), f"{label}.headline", fullwidth_tilde=fullwidth_tilde)
+    else:
+        headline = _clean_line(raw.get("headline"), f"{label}.headline", fullwidth_tilde=fullwidth_tilde)
+    kicker = _clean_paragraph(raw.get("kicker"), fullwidth_tilde=fullwidth_tilde)
+    subhead = _clean_paragraph(raw.get("subhead"), fullwidth_tilde=fullwidth_tilde)
+    note = _clean_paragraph(raw.get("note"), fullwidth_tilde=fullwidth_tilde)
+    points = [_clean_paragraph(item, fullwidth_tilde=fullwidth_tilde) for item in (raw.get("points") or [])]
     points = [item for item in points if item]
     raw_columns = raw.get("columns") or []
     if not isinstance(raw_columns, list):
         raise LLMOutputError(f"{label}.columns must be a list")
     columns = [
         ImageColumn(
-            label=_clean_line(item.get("label"), f"{label}.column.label"),
-            text=_clean_paragraph(item.get("text")),
+            label=_clean_line(item.get("label"), f"{label}.column.label", fullwidth_tilde=fullwidth_tilde),
+            text=_clean_paragraph(item.get("text"), fullwidth_tilde=fullwidth_tilde),
         )
         for item in raw_columns
         if isinstance(item, dict)
@@ -828,7 +911,7 @@ def _validate_card(
         "column_label": 24,
         "column_text": 120,
     }
-    if len(headline) > limits["headline"]:
+    if len(headline.replace("\n", "")) > limits["headline"]:
         raise LLMOutputError(f"{label}.headline is too long for one card")
     if len(kicker) > limits["kicker"]:
         raise LLMOutputError(f"{label}.kicker is too long")
@@ -847,13 +930,13 @@ def _validate_card(
     ):
         raise LLMOutputError(f"{label} comparison text is missing or too long")
 
-    if layout == "comparison":
+    if layout in {"comparison", "checklist"}:
         if len(columns) != 2:
-            raise LLMOutputError(f"{label} comparison needs exactly two columns")
+            raise LLMOutputError(f"{label} {layout} needs exactly two columns")
         if points:
-            raise LLMOutputError(f"{label} comparison must not also carry a points list")
+            raise LLMOutputError(f"{label} {layout} must not also carry a points list")
     elif columns:
-        raise LLMOutputError(f"{label} columns are only valid for comparison")
+        raise LLMOutputError(f"{label} columns are only valid for comparison or checklist")
     if layout == "process":
         if len(points) < 2:
             raise LLMOutputError(f"{label} process needs at least two steps")
@@ -869,8 +952,100 @@ def _validate_card(
             raise LLMOutputError(f"{label} annotated needs a source excerpt in subhead")
         if not points:
             raise LLMOutputError(f"{label} annotated needs at least one note")
-    if layout == "cover" and (points or columns):
-        raise LLMOutputError(f"{label} cover must use headline/subhead, not points/columns")
+    if layout == "timeline":
+        if len(points) < 2:
+            raise LLMOutputError(f"{label} timeline needs at least two dated entries")
+        if any(not _TIMELINE_DATE_RE.match(point.strip()) for point in points):
+            raise LLMOutputError(f"{label} timeline entries must start with a date")
+    if layout == "qa":
+        normalized_qa: list[str] = []
+        if not (2 <= len(points) <= 4):
+            raise LLMOutputError(f"{label} qa needs 2 to 4 question｜answer pairs")
+        for point in points:
+            sep = "｜" if "｜" in point else ("|" if "|" in point else "")
+            if not sep:
+                raise LLMOutputError(f"{label} qa entry must be 'question｜answer'")
+            q_part, a_part = [p.strip() for p in point.split(sep, 1)]
+            if not q_part or not a_part:
+                raise LLMOutputError(f"{label} qa entry cannot have empty question or answer")
+            normalized_qa.append(f"{q_part}｜{a_part}")
+        points = normalized_qa
+
+    raw_stats = raw.get("stats") or []
+    stats: list[dict[str, str]] = []
+    if isinstance(raw_stats, list):
+        for item in raw_stats:
+            if not isinstance(item, dict):
+                continue
+            val = _clean_paragraph(item.get("value"), fullwidth_tilde=fullwidth_tilde)
+            unit = _clean_paragraph(item.get("unit"), fullwidth_tilde=fullwidth_tilde)
+            lbl = _clean_paragraph(item.get("label"), fullwidth_tilde=fullwidth_tilde)
+            if not val or not lbl:
+                continue
+            if len(val) > 8 or len(unit) > 6 or len(lbl) > 24:
+                if layout == "stat":
+                    raise LLMOutputError(f"{label} stat item exceeds length bounds")
+                continue
+            stats.append({"value": val, "unit": unit, "label": lbl})
+    if layout == "stat":
+        if not (1 <= len(stats) <= 3):
+            raise LLMOutputError(f"{label} stat needs 1 to 3 stats items")
+
+    attribution = _clean_paragraph(raw.get("attribution"), fullwidth_tilde=fullwidth_tilde)[:40]
+    if layout == "quote":
+        if not subhead:
+            raise LLMOutputError(f"{label} quote needs the original quote in subhead")
+        if not attribution:
+            raise LLMOutputError(f"{label} quote needs attribution")
+        if ids and all(
+            str((evidence_by_id.get(eid) or {}).get("source_role") or "").lower() == "secondary"
+            for eid in ids
+        ):
+            if not any(tok in attribution for tok in ("据", "报道", "采访", "转述")):
+                raise LLMOutputError(
+                    f"{label} quote from secondary source must cite reporting attribution (e.g. 据…报道)"
+                )
+
+    raw_variant = str(raw.get("variant") or "headline").strip().lower()
+    if layout == "cover":
+        if points or columns:
+            raise LLMOutputError(f"{label} cover must use headline/subhead, not points/columns")
+        variant = raw_variant if raw_variant in COVER_VARIANTS else "headline"
+        if variant == "stat" and not stats:
+            variant = "headline"
+        if variant == "quote" and not (subhead and attribution):
+            if not subhead:
+                variant = "headline"
+        if variant != "stat":
+            stats = []
+        else:
+            stats = stats[:3]
+    else:
+        variant = ""
+        if layout != "stat":
+            stats = []
+        if layout != "quote":
+            attribution = ""
+
+    # Aesthetic fields: silent drop if invalid
+    raw_emphasis = raw.get("emphasis") or []
+    emphasis: list[str] = []
+    if isinstance(raw_emphasis, list):
+        haystack_parts = [headline, headline.replace("\n", ""), *points]
+        for item in raw_emphasis:
+            if not isinstance(item, str):
+                continue
+            cleaned_emph = normalize_zh(item.strip(), fullwidth_tilde=fullwidth_tilde)
+            if not cleaned_emph:
+                continue
+            if any(cleaned_emph in part for part in haystack_parts):
+                if cleaned_emph not in emphasis:
+                    emphasis.append(cleaned_emph)
+            if len(emphasis) >= 2:
+                break
+
+    raw_icon = str(raw.get("icon") or "").strip().lower()
+    icon = raw_icon if raw_icon in ALLOWED_ICONS else ""
 
     card = ImageCard(
         layout=layout,
@@ -881,6 +1056,11 @@ def _validate_card(
         columns=columns,
         note=note,
         evidence_ids=ids,
+        variant=variant,
+        stats=stats,
+        attribution=attribution,
+        emphasis=emphasis,
+        icon=icon,
     )
     # Image statements are public claims too.  Require provenance even for a
     # cover: a citation-free hook could otherwise become an unsupported fact.
@@ -924,6 +1104,7 @@ def _validate_storyboard(
         evidence_by_id=evidence_by_id,
         claims=claims,
         allow_cover=True,
+        config=config,
     )
     cards = [
         _validate_card(
@@ -932,12 +1113,13 @@ def _validate_storyboard(
             evidence_by_id=evidence_by_id,
             claims=claims,
             allow_cover=False,
+            config=config,
         )
         for index, item in enumerate(raw_cards)
     ]
     storyboard = ImageStoryboard(cover=cover, cards=cards)
     total_max = int(config.get("writer.storyboard_max_chars", 900))
-    if len(storyboard.text()) > total_max:
+    if len(storyboard.text().replace("\n", "")) > total_max:
         raise LLMOutputError(
             f"storyboard text is {len(storyboard.text())} chars, limit is {total_max}; "
             "images must stay a concise visual summary"
@@ -945,7 +1127,9 @@ def _validate_storyboard(
     return storyboard
 
 
-def _validate_claims(raw_claims: Any, evidence_by_id: dict[str, dict]) -> list[Claim]:
+def _validate_claims(
+    raw_claims: Any, evidence_by_id: dict[str, dict], *, fullwidth_tilde: bool = True
+) -> list[Claim]:
     # 规则：
     #   - 至少一条主张，最多 10 条（防止模型灌水）；
     #   - 每条主张的 type 必须是 fact / vendor_claim / analysis 之一；
@@ -960,7 +1144,7 @@ def _validate_claims(raw_claims: Any, evidence_by_id: dict[str, dict]) -> list[C
     for raw in raw_claims:
         if not isinstance(raw, dict):
             raise LLMOutputError("each claim must be an object")
-        text = _clean_paragraph(raw.get("text"))
+        text = _clean_paragraph(raw.get("text"), fullwidth_tilde=fullwidth_tilde)
         if not text:
             continue
         kind = str(raw.get("type", "")).strip()
@@ -1236,19 +1420,37 @@ def _check_banned(content: DraftContent, banned: list[str]) -> None:
         )
 
 
-def _clean_line(value: Any, label: str) -> str:
-    # 单行文本清洗：只接受字符串/数字，NFKC 归一化（全角转半角），
+def _clean_line(value: Any, label: str, *, fullwidth_tilde: bool = True) -> str:
+    # 单行文本清洗：只接受字符串/数字，NFKC 归一化并做中文标点恢复，
     # 把连续空白压成一个空格，再检查不能为空。
     if not isinstance(value, (str, int, float)):
         raise LLMOutputError(f"{label} must be text")
     text = unicodedata.normalize("NFKC", str(value)).strip()
     text = re.sub(r"\s+", " ", text)
+    text = normalize_zh(text, fullwidth_tilde=fullwidth_tilde).strip()
     if not text:
         raise LLMOutputError(f"{label} must not be empty")
     return text
 
 
-def _clean_paragraph(value: Any) -> str:
+def _clean_headline(value: Any, label: str, *, fullwidth_tilde: bool = True) -> str:
+    # 封面标题允许最多 2 个作者指定断行 `\n`；超出部分合并为空格。
+    if not isinstance(value, (str, int, float)):
+        raise LLMOutputError(f"{label} must be text")
+    raw = unicodedata.normalize("NFKC", str(value)).replace("\r\n", "\n")
+    lines: list[str] = []
+    for part in raw.split("\n"):
+        cleaned = re.sub(r"[ \t]+", " ", part).strip()
+        if cleaned:
+            lines.append(cleaned)
+    if not lines:
+        raise LLMOutputError(f"{label} must not be empty")
+    if len(lines) > 3:
+        lines = [lines[0], lines[1], " ".join(lines[2:])]
+    return normalize_zh("\n".join(lines), fullwidth_tilde=fullwidth_tilde)
+
+
+def _clean_paragraph(value: Any, *, fullwidth_tilde: bool = True) -> str:
     # 段落清洗比单行宽松：保留换行，但去掉所有控制字符，
     # 把多行压成单行内的换行，最后截到 800 字。
     # 控制字符（如 \x00、\x07）可能破坏 JSON、日志或渲染，必须清掉。
@@ -1262,5 +1464,10 @@ def _clean_paragraph(value: Any) -> str:
     text = "".join(ch for ch in text if ch == "\n" or ord(ch) >= 32)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{2,}", "\n", text)
+    text = "\n".join(
+        normalize_zh(line.strip(), fullwidth_tilde=fullwidth_tilde)
+        for line in text.split("\n")
+        if line.strip()
+    )
     return text.strip()[:800]
 

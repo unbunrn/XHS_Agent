@@ -142,19 +142,29 @@ def accept_inbound(
     return {"ok": True, "duplicate": False, "brief": brief.as_dict(), "job_id": job_id}
 
 
-def _revision_target(
-    db: Database, account_id: str, approval_code: str | None = None
-) -> dict[str, Any] | None:
-    """Latest V2 submission in this account that can still be revised.
+def _brief_topic(value: Any) -> str:
+    try:
+        return str(json.loads(str(value or "{}")).get("topic") or "")
+    except (TypeError, ValueError):
+        return ""
 
-    An explicit approval code narrows the target; otherwise the latest
-    submitted artifact in the same account is used.  A target from another
-    account is never selected.
+
+def _revision_candidates(
+    db: Database, account_id: str, approval_code: str | None = None
+) -> list[dict[str, Any]]:
+    """V2 submissions in this account that can still be revised.
+
+    One row per approval (the latest submitted artifact for that approval).
+    An explicit code narrows the list; otherwise the caller must ask the owner
+    when more than one work is eligible.
     """
     sql = (
         "SELECT ca.run_key, ca.version, ca.draft_id, r.generation, "
         "r.brief_json AS brief_json, a.account_id AS account_id, "
-        "a.id AS approval_id, a.code AS approval_code, a.status AS approval_status "
+        "a.id AS approval_id, a.code AS approval_code, a.status AS approval_status, "
+        "(SELECT 1 FROM publication_tasks pt WHERE pt.approval_id=a.id "
+        " AND pt.state NOT IN ('published','cancelled','failed','reconciled_not_published')) "
+        " AS active_publication "
         "FROM creator_agent_artifacts ca "
         "JOIN creator_agent_runs r ON r.run_key=ca.run_key "
         "JOIN drafts d ON d.id=ca.draft_id "
@@ -166,9 +176,52 @@ def _revision_target(
     if approval_code:
         sql += " AND a.code=?"
         params.append(approval_code)
-    sql += " ORDER BY ca.rowid DESC LIMIT 1"
-    row = db.fetchone(sql, tuple(params))
-    return dict(row) if row is not None else None
+    sql += " ORDER BY ca.rowid DESC"
+    rows = [dict(row) for row in db.fetchall(sql, tuple(params))]
+    out: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for row in rows:
+        approval_id = int(row["approval_id"])
+        if approval_id in seen:
+            continue
+        seen.add(approval_id)
+        out.append(row)
+    return out
+
+
+def _revision_target(
+    db: Database, account_id: str, approval_code: str | None = None
+) -> dict[str, Any] | None:
+    """Backward-friendly single-target helper (latest eligible work)."""
+    rows = _revision_candidates(db, account_id, approval_code)
+    return rows[0] if rows else None
+
+
+def _revision_job_active(db: Database, target: dict[str, Any]) -> bool:
+    """True when this exact artifact version already has a queued/running revision.
+
+    A second instruction must not race the first one and produce two generation-2
+    artifacts from the same base.  A failed or completed job does not block a
+    retry; the original approval stays revision_pending until the owner sees the
+    outcome.
+    """
+    rows = db.fetchall(
+        "SELECT payload_json FROM jobs WHERE kind='creator_agent_run' "
+        "AND state IN ('pending','running')"
+    )
+    for row in rows:
+        try:
+            payload = json.loads(str(row["payload_json"] or "{}"))
+        except (TypeError, ValueError):
+            continue
+        brief = payload.get("brief") or {}
+        if (
+            str(brief.get("origin") or "") == "revision"
+            and str(brief.get("parent_run_key") or "") == str(target.get("run_key") or "")
+            and int(brief.get("base_artifact_version") or 0) == int(target.get("version") or 0)
+        ):
+            return True
+    return False
 
 
 def accept_revision(
@@ -180,19 +233,49 @@ def accept_revision(
     text: str,
     sender_id: str,
     chat_type: str,
+    config=None,
 ) -> dict[str, Any]:
-    """Bind a V2 revision to the latest submitted artifact and freeze its approval."""
+    """Bind a V2 revision to one submitted artifact and freeze its approval."""
     raw = strip_command_prefix(text)
     if not raw:
         return {"ok": False, "outcome": "revision_needs_instruction"}
     import re
 
     explicit = re.search(r"(?i)\bXH-[A-Z0-9]{4,12}\b", raw)
-    target = _revision_target(
-        db, account_id, explicit.group(0).upper() if explicit else None
-    )
-    if target is None:
-        return {"ok": False, "outcome": "revision_no_target"}
+    code = explicit.group(0).upper() if explicit else None
+    candidates = _revision_candidates(db, account_id, code)
+    if not candidates:
+        return {
+            "ok": False,
+            "outcome": "revision_no_target",
+            "explicit_code": code or "",
+        }
+    if code is None and len(candidates) > 1:
+        return {
+            "ok": False,
+            "outcome": "revision_ambiguous",
+            "candidates": [
+                {
+                    "code": row["approval_code"],
+                    "approval_id": row["approval_id"],
+                    "topic": _brief_topic(row.get("brief_json")),
+                }
+                for row in candidates[:5]
+            ],
+        }
+    target = candidates[0]
+    if target.get("active_publication"):
+        return {
+            "ok": False,
+            "outcome": "revision_in_flight",
+            "approval_code": target["approval_code"],
+        }
+    if _revision_job_active(db, target):
+        return {
+            "ok": False,
+            "outcome": "revision_already_running",
+            "approval_code": target["approval_code"],
+        }
     ordinal_words = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
     must_keep: list[str] = []
     for match in re.finditer(r"(?:保留|原样保留|不改).{0,8}?第([一二三四五六七八九十\d]+)张", raw):
@@ -207,6 +290,9 @@ def accept_revision(
     except (TypeError, ValueError):
         parent_brief = {}
     parent_topic = str(parent_brief.get("topic") or target["run_key"])
+    rewrite = any(
+        word in raw for word in ("整体重写", "全部重写", "整篇重写", "重新写一篇", "全文重写")
+    )
     brief = CreativeBrief(
         run_key=run_key_for(account_id, message_id),
         account_id=account_id,
@@ -217,6 +303,8 @@ def accept_revision(
         base_artifact_version=int(target["version"]),
         parent_run_key=str(target["run_key"]),
         must_keep=must_keep,
+        may_change=["all"] if rewrite else [],
+        feedback_message_id=message_id,
     )
     now = to_iso(clock.now())
     with db.tx() as conn:
@@ -228,11 +316,17 @@ def accept_revision(
                 "ok": True, "duplicate": True, "outcome": existing["outcome"],
                 "message_id": message_id,
             }
-        conn.execute(
+        updated = conn.execute(
             "UPDATE approvals SET status='revision_pending', decided_at=?, decided_by=?, "
-            "decision_comment=? WHERE id=? AND status IN ('pending','approved')",
+            "decision_comment=? WHERE id=? AND status IN ('pending','approved','revision_pending')",
             (now, sender_id, f"V2 revision requested: {raw[:500]}", target["approval_id"]),
         )
+        if updated.rowcount != 1:
+            return {
+                "ok": False,
+                "outcome": "revision_conflict",
+                "approval_code": target["approval_code"],
+            }
         conn.execute(
             "UPDATE drafts SET status='revision_pending', updated_at=? WHERE id=? "
             "AND status IN ('drafted','review_pending','approved')",
@@ -258,11 +352,29 @@ def accept_revision(
             db, "creator_agent_run", f"creator-run:{brief.run_key}:g{brief.generation}",
             payload={"brief": brief.as_dict()}, clock=clock, conn=conn,
         )
+        if config is not None:
+            keep = "，保留第 " + "、".join(
+                item.split(":")[-1] for item in must_keep
+            ) + " 张图" if must_keep else ""
+            queue_outcome(
+                db,
+                config,
+                clock,
+                (
+                    f"已收到修改意见，正在修改 {target['approval_code']}"
+                    f"（基于版本 v{target['version']}{keep}）。"
+                    "这次会生成新版本并重新送审，仍需你批准，不会自动发布。"
+                ),
+                dedupe_key=f"inbound:{message_id}",
+                conn=conn,
+            )
     return {
         "ok": True, "duplicate": False, "outcome": "creator_revision_queued",
         "brief": brief.as_dict(), "job_id": job_id,
         "base_run_key": target["run_key"], "base_version": target["version"],
         "invalidated_approval": target["approval_code"],
+        "approval_code": target["approval_code"],
+        "must_keep": list(must_keep),
     }
 
 

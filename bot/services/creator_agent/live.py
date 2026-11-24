@@ -29,13 +29,81 @@ from bot.services.drafts import DraftError, _finalize_with_approval, _insert_dra
 from bot.services.research import ingest_targeted_entries
 from bot.timeutil import to_iso
 from bot.security import images_digest, sha256_file, sha256_text
-from bot.adapters.types import BudgetExceeded, SourceEntry
+from bot.adapters.types import BudgetExceeded, LLMOutputError, SourceEntry
 from bot.adapters.sources import host_matches_allowed_domains
 from bot.services.source_policy import trusted_search_domains
 
 from .contracts import ArtifactVersion, ClaimAssessment, CreativeBrief, Material, Review, ReviewIssue
 from .policy import claim_issues, submission_issues
 from .registry import ToolResult
+
+
+class DraftValidationError(DraftError):
+    """A validation failure that the model can act on.
+
+    The old code reduced every validation error to one English string.  Keep the
+    machine-readable issues and the rejected candidate so the revision loop can
+    make one targeted repair instead of repeating the same call.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        issues: list[dict[str, Any]] | None = None,
+        candidate: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.issues = list(issues or [])
+        self.candidate = dict(candidate or {})
+
+
+def _candidate_view(data: dict[str, Any]) -> dict[str, Any]:
+    """Only return fields a repair step can safely reuse."""
+    return {
+        key: data.get(key)
+        for key in ("title", "caption", "storyboard", "claims", "tags", "uncertainties")
+        if key in data
+    }
+
+
+def _validation_issues(exc: Exception, data: dict[str, Any]) -> list[dict[str, Any]]:
+    text = str(exc)
+    issues: list[dict[str, Any]] = []
+    match = re.search(
+        r"numeric claim in '([^']+)' is not supported by cited evidence: ([^\s]+)",
+        text,
+    )
+    if match:
+        issues.append(
+            {
+                "field": match.group(1),
+                "type": "numeric_claim",
+                "snippet": match.group(2),
+                "action": "cite the source that contains this number, or remove it from this field",
+            }
+        )
+    unknown = re.search(r"claim cites unknown evidence: (\[[^\]]*\])", text)
+    if unknown:
+        issues.append(
+            {
+                "field": "claims",
+                "type": "unknown_evidence",
+                "snippet": unknown.group(1),
+                "action": "use only material IDs present in the brief",
+            }
+        )
+    if not issues:
+        issues.append(
+            {
+                "field": "draft",
+                "type": "validation",
+                "snippet": text[:300],
+                "action": "repair this field once; do not repeat the same unchanged draft",
+            }
+        )
+    issues[0]["candidate"] = _candidate_view(data)
+    return issues
 
 
 def _host(url: str) -> str:
@@ -139,7 +207,24 @@ class LiveRuntime:
         quoted evidence rows are sufficient for the writer to cite the same
         sources without pretending a summary is a new fetch.
         """
-        if artifact is None or not artifact.draft_id:
+        if artifact is None:
+            return []
+        # Prefer the exact materials the parent Creator Agent run searched and
+        # saved.  The old evidence table only keeps a short quote, so a number
+        # supported by the full body looked unsupported during revision.
+        if artifact.run_key:
+            parent_materials = self.store.materials(artifact.run_key)
+            if parent_materials:
+                out: list[Material] = []
+                for material in parent_materials:
+                    body = self.store.material_body(artifact.run_key, material.material_id)
+                    body = body or material.quote or ""
+                    material = replace(material, quote=body)
+                    self._materials[material.material_id] = material
+                    self._bodies[material.material_id] = body
+                    out.append(material)
+                return out
+        if not artifact.draft_id:
             return []
         draft = self.db.fetchone(
             "SELECT event_id FROM drafts WHERE id=?", (int(artifact.draft_id),)
@@ -151,7 +236,7 @@ class LiveRuntime:
             "FROM evidence WHERE event_id=? ORDER BY id",
             (int(draft["event_id"]),),
         )
-        out: list[Material] = []
+        out = []
         for row in rows:
             mid = f"P{int(row['id'])}"
             quote = str(row["quote"] or "")
@@ -187,7 +272,7 @@ class LiveRuntime:
             if not url:
                 continue
             title = normalize_ws(strip_html(str(item.get("title") or "")))[:300]
-            body = str(item.get("content") or "").strip()
+            body = str(item.get("content") or item.get("raw_content") or "").strip()
             if not body:
                 try:
                     fetched = source.fetch_content(url)
@@ -246,14 +331,37 @@ class LiveRuntime:
         if not url:
             raise KeyError("material_id or url is required")
         before = self.fetch_quota.attempts
-        self.fetch_quota.record_send()
+        body = ""
+        try:
+            self.fetch_quota.record_send()
+            response = self.http.get(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; OpsAgent/1.0)"},
+                timeout=float(self.config.get("network.timeout_seconds", 20)),
+                max_bytes=int(self.config.get("network.max_fetch_bytes", 2_097_152)),
+                retries=0,
+            )
+            if response.status != 200:
+                raise RuntimeError(f"fetch HTTP {response.status}")
+            body = normalize_ws(strip_html(response.text()))[:20000]
+        except Exception as direct_exc:
+            # When local direct fetch fails (e.g. overseas host behind local TUN
+            # Fake-IP or anti-bot block), fall back to the official DeepSeek
+            # /v1/tools/fetch endpoint within the same fetch_quota and budget.
+            if self.fetch_quota.remaining <= 0:
+                self.last_physical_fetches = self.fetch_quota.attempts - before
+                raise direct_exc
+            try:
+                source = self._default_search_factory("fetch", 1, "news")
+                fetched = source.fetch_content(str(url))
+                body = normalize_ws(strip_html(str(fetched.get("content") or "")))[:20000]
+            except Exception:
+                self.last_physical_fetches = self.fetch_quota.attempts - before
+                raise direct_exc
+            if not body:
+                self.last_physical_fetches = self.fetch_quota.attempts - before
+                raise direct_exc
         self.last_physical_fetches = self.fetch_quota.attempts - before
-        response = self.http.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; OpsAgent/1.0)"},
-                                 timeout=float(self.config.get("network.timeout_seconds", 20)),
-                                 max_bytes=int(self.config.get("network.max_fetch_bytes", 2_097_152)), retries=0)
-        if response.status != 200:
-            raise RuntimeError(f"fetch HTTP {response.status}")
-        body = normalize_ws(strip_html(response.text()))[:20000]
         mid = material_id or f"M{len(self._materials) + 1}"
         material = Material(material_id=mid, url=str(url), title=str(url), role="secondary",
                             content_hash=sha256_text(body), quote=body[:3000])
@@ -291,7 +399,10 @@ class LiveRuntime:
             m = self._materials[mid]
             body = self._bodies.get(mid, "")
             evidence.append({
-                "id": mid, "quote": (body or m.quote)[:900],
+                # A 900-character window used to hide facts that lived later in
+                # the same fetched page.  Keep a generous bounded body (the
+                # writer payload caps the number of materials), not a summary.
+                "id": mid, "quote": (body or m.quote)[:4000],
                 "source_name": m.title or _host(m.url), "url": m.url,
                 "published_at": m.published_at, "trust_tier": 2,
                 "source_role": m.role, "source_verified": m.role == "official",
@@ -299,8 +410,74 @@ class LiveRuntime:
             })
         return evidence, ids
 
+    @staticmethod
+    def _revision_changes(instruction: str) -> list[dict[str, str]]:
+        text = str(instruction or "")
+        changes: list[dict[str, str]] = []
+        if "标题" in text and any(word in text for word in ("短", "精简")):
+            changes.append({"artifact": "title", "intent": "shorten"})
+        if "去重" in text or "重复" in text:
+            changes.append({"artifact": "images", "intent": "deduplicate"})
+        if "排版" in text or "配图" in text:
+            changes.append({"artifact": "images", "intent": "layout"})
+        if "扩" in text and "正文" in text:
+            changes.append({"artifact": "caption", "intent": "expand"})
+        return changes
+
+    @staticmethod
+    def _visible(content: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: content.get(key)
+            for key in ("title", "caption", "storyboard", "claims")
+        }
+
+    def _apply_local_scope(
+        self,
+        *,
+        current: dict[str, Any] | None,
+        content: DraftContent,
+        brief: CreativeBrief,
+        instruction: str,
+        revision_plan: dict[str, Any] | None,
+    ) -> None:
+        """Keep unrequested fields when the owner asked for a local edit.
+
+        This is deliberately a small merge, not a second writer.  It only
+        protects the common cases (title-only, opening-only) from a full-body
+        rewrite drifting into unrelated claims.
+        """
+        if not current:
+            return
+        text = str(instruction or "")
+        scope = str((revision_plan or {}).get("scope") or "")
+        rewrite_words = ("整体重写", "全部重写", "整篇重写", "重新写一篇", "全文重写")
+        if scope == "rewrite" or any(word in text for word in rewrite_words):
+            return
+        if "all" in (brief.may_change or []):
+            return
+        base = DraftContent.from_dict(current)
+        body_words = ("正文", "开头", "全文", "段落", "内容")
+        title_only = ("标题" in text or scope == "title") and not any(
+            word in text for word in body_words
+        )
+        opening_only = ("开头" in text or scope == "opening") and not any(
+            word in text for word in ("全文", "整体", "整篇")
+        )
+        if title_only:
+            content.caption = list(base.caption)
+            content.storyboard = base.storyboard
+            content.claims = list(base.claims)
+            content.sections = list(base.sections)
+        elif opening_only and content.caption and base.caption:
+            content.caption = [content.caption[0], *base.caption[1:]]
+            content.storyboard = base.storyboard
+            content.claims = list(base.claims)
+            content.sections = list(base.sections)
+
     def _write(self, brief: CreativeBrief, *, instruction: str = "", material_ids=None,
-               base_version=None, current: dict | None = None):
+               base_version=None, current: dict | None = None,
+               base_artifact: ArtifactVersion | None = None,
+               revision_plan: dict[str, Any] | None = None):
         evidence, ids = self._evidence([str(x) for x in (material_ids or [])])
         if not evidence:
             raise DraftError("no materials available for drafting")
@@ -308,40 +485,71 @@ class LiveRuntime:
             "id": 0, "title": brief.topic, "summary": brief.instruction or brief.topic,
             "latest_published_at": None, "source_name": "creator-agent",
         }
-        style = (
-            "这是小红书个人笔记，不是报告：用第一人称、口语化表达你的判断和感受；"
-            "不要写“本文/综上/首先其次”等报告腔，不要列参考文献、来源列表或 URL。"
-            "热点信息用自然转述，例如“看到外媒报道”“官方页面提到”；"
-            "观点要明确，但不要编造亲测体验。"
-        )
-        writer_instruction = "\n".join(
-            part for part in (instruction or brief.instruction or "", style) if part
-        )
+        writer_instruction = (instruction or brief.instruction or "").strip()
+        revision_request = None
+        if current is not None:
+            revision_request = {
+                "instruction": instruction or brief.instruction,
+                "must_keep": list(brief.must_keep or []),
+                "may_change": list(brief.may_change or []),
+                "changes": self._revision_changes(instruction or brief.instruction),
+                "scope": str((revision_plan or {}).get("scope") or ""),
+            }
         payload = build_writer_payload(
-            self.db, self.config, event, evidence, clock=self.clock,
+            self.db,
+            self.config,
+            event,
+            evidence,
+            clock=self.clock,
             instruction=writer_instruction,
             current_draft=current,
+            revision_request=revision_request,
+            seed=self.run_key,
         )
+        # The writer sees a bounded excerpt, but the validator must check the
+        # saved body.  Otherwise a fact at character 4,001 is invisible to the
+        # number check even though the source is stored locally.
+        validation_evidence = {
+            e["id"]: {**e, "quote": self._bodies.get(e["id"]) or e["quote"]}
+            for e in evidence
+        }
         self.writer_model_calls += 1
+        max_output_tokens = int(self.config.get("budget.max_output_tokens", 1800))
+        if current is not None:
+            # A revision carries the full parent draft plus the requested
+            # comparison/expansion.  Keep the draft budget unchanged but give
+            # the revision writer enough room to finish its JSON object.
+            max_output_tokens = max(
+                max_output_tokens,
+                int(self.config.get("budget.revision_max_output_tokens", 2600)),
+            )
         response = self.llm.complete_json(
-            purpose="draft", payload=payload,
-            max_output_tokens=int(self.config.get("budget.max_output_tokens", 1800)),
+            purpose="revise" if current is not None else "draft", payload=payload,
+            max_output_tokens=max_output_tokens,
             before_attempt=self._reserve_model_call,
         )
-        content = validate_draft_payload(
-            response.data,
-            evidence_by_id={e["id"]: e for e in evidence},
-            config=self.config,
-            date_unknown=False,
-            generator=getattr(response, "provider", "unknown") or "unknown",
-            model=getattr(response, "model", "") or "",
-            require_storyboard=True,
-            soft_body_limit=True,
-            include_sources_in_body=False,
-            public_disclaimers=False,
-            repair_caption_claims=True,
-            owner_context=f"{brief.topic}\n{brief.instruction}",
-        )
+        try:
+            content = validate_draft_payload(
+                response.data,
+                evidence_by_id=validation_evidence,
+                config=self.config,
+                date_unknown=False,
+                generator=getattr(response, "provider", "unknown") or "unknown",
+                model=getattr(response, "model", "") or "",
+                require_storyboard=True,
+                soft_body_limit=True,
+                include_sources_in_body=False,
+                public_disclaimers=False,
+                repair_caption_claims=True,
+                owner_context=f"{brief.topic}\n{brief.instruction}",
+            )
+        except (LLMOutputError, DraftError) as exc:
+            candidate = response.data if isinstance(response.data, dict) else {}
+            raise DraftValidationError(
+                str(exc),
+                issues=_validation_issues(exc, candidate),
+                candidate=_candidate_view(candidate),
+            ) from exc
         # The writer prompt still occasionally emits a report-style disclaimer.
         # Keep it in private uncertainty metadata, not in the XHS caption.
         content.caption = [
@@ -357,6 +565,36 @@ class LiveRuntime:
         content.caption = cleaned_caption
         if not content.caption:
             raise DraftError("writer produced no public caption after removing boilerplate")
+        content = self._maybe_polish_draft(
+            content=content,
+            brief=brief,
+            evidence=evidence,
+            validation_evidence=validation_evidence,
+        )
+        if current is not None:
+            self._apply_local_scope(
+                current=current,
+                content=content,
+                brief=brief,
+                instruction=instruction or brief.instruction,
+                revision_plan=revision_plan,
+            )
+            if base_artifact is not None and self._visible(content.as_dict()) == self._visible(current):
+                raise DraftValidationError(
+                    "修改没有产生可见变化",
+                    issues=[
+                        {
+                            "field": "draft",
+                            "type": "no_change",
+                            "snippet": "",
+                            "action": (
+                                "make a real change to the requested field, or report that "
+                                "the instruction cannot be applied"
+                            ),
+                        }
+                    ],
+                    candidate=_candidate_view(content.as_dict()),
+                )
         latest = self.store.latest_artifact(brief.run_key)
         version = 1 if latest is None else int(latest.version) + 1
         artifact = ArtifactVersion(
@@ -386,7 +624,7 @@ class LiveRuntime:
             quote = ""
             status = "inference" if not evidence_ids else "uncertain"
             if mid and body and material is not None:
-                candidate = _quote_for_claim(material.quote, str(text))
+                candidate = _quote_for_claim(body, str(text))
                 missing = [
                     n for n in re.findall(r"\d+(?:\.\d+)?", str(text))
                     if n not in candidate
@@ -423,7 +661,8 @@ class LiveRuntime:
         base = base_artifact.content if base_artifact else None
         artifact = self._write(brief, instruction=instruction, material_ids=material_ids,
                                base_version=base_artifact.version if base_artifact else None,
-                               current=base)
+                               current=base, base_artifact=base_artifact,
+                               revision_plan=revision_plan)
         preserve = self._preserve_ordinals(brief, revision_plan)
         if base_artifact is not None and base_artifact.images:
             # Keep the previous manifest available for submit.  Only explicitly
@@ -442,7 +681,7 @@ class LiveRuntime:
         return artifact
 
     # ----- render/inspect/review -------------------------------------------
-    def render_images(self, *, brief, artifact, layouts=None):
+    def render_images(self, *, brief, artifact, layouts=None, theme: str | None = None):
         if artifact is None:
             raise RuntimeError("no artifact")
         content = DraftContent.from_dict(artifact.content)
@@ -463,12 +702,29 @@ class LiveRuntime:
                 raise RuntimeError(
                     f"preserved image {ordinal} hash changed; refusing to accept new bytes"
                 )
-        rendered = (self.renderer or self._render)(content, out_dir, f"{self.run_key}-v{artifact.version}")
+        draft_key = f"{self.run_key}-v{artifact.version}"
+        if self.renderer is not None:
+            import inspect
+
+            try:
+                sig = inspect.signature(self.renderer)
+                if "theme" in sig.parameters:
+                    rendered = self.renderer(content, out_dir, draft_key, theme=theme)
+                else:
+                    rendered = self.renderer(content, out_dir, draft_key)
+            except (TypeError, ValueError):
+                rendered = self.renderer(content, out_dir, draft_key)
+        else:
+            rendered = self._render(content, out_dir, draft_key, theme=theme)
         final: list[dict] = []
         out_dir.mkdir(parents=True, exist_ok=True)
         seen_ordinals: set[int] = set()
         for index, image in enumerate(rendered, 1):
             item = image.as_dict()
+            if getattr(image, "theme", ""):
+                item["theme"] = image.theme
+            if getattr(image, "palette", ""):
+                item["palette"] = image.palette
             ordinal = int(item.get("ordinal") or index)
             if ordinal in seen_ordinals:
                 raise RuntimeError(f"renderer returned duplicate image ordinal {ordinal}")
@@ -503,32 +759,250 @@ class LiveRuntime:
         self.store.save_artifact(artifact)
         return artifact
 
-    def _render(self, content, out_dir, draft_key):
+    def _render(
+        self,
+        content,
+        out_dir,
+        draft_key,
+        *,
+        theme: str | None = None,
+    ):
         from bot.render import render_draft
-        return render_draft(content, out_dir=out_dir, config=self.config, draft_key=draft_key)
+        return render_draft(
+            content,
+            out_dir=out_dir,
+            config=self.config,
+            draft_key=draft_key,
+            db=self.db,
+            theme=theme,
+            run_key=self.run_key,
+        )
+
+    def _maybe_polish_draft(
+        self,
+        *,
+        content: DraftContent,
+        brief,
+        evidence: list[dict],
+        validation_evidence: dict,
+    ) -> DraftContent:
+        """Run optional single-pass style polish when AI-style lint exceeds threshold."""
+        from bot.style_lint import lint_draft, recent_posts
+        from bot.voice import load_voice
+
+        voice = load_voice(self.config)
+        recent = recent_posts(self.db, limit=voice.recent_window)
+        report = lint_draft(content, voice, recent=recent)
+        if report.score <= voice.max_score:
+            return content
+
+        if not bool(self.config.get("writer.style_polish", True)):
+            return content
+
+        import copy
+        import logging
+
+        recent_openings = [p.opening_move for p in recent[:2] if p.opening_move]
+        polish_payload = {
+            "draft": content.as_dict(),
+            "style_issues": report.issues,
+            "voice": voice.as_prompt_dict(
+                seed=f"{self.run_key}:polish",
+                recent_openings=recent_openings,
+            ),
+            "evidence": [
+                {
+                    "id": e["id"],
+                    "quote": e["quote"],
+                    "source_name": e.get("source_name", ""),
+                }
+                for e in evidence
+            ],
+        }
+        try:
+            self.writer_model_calls += 1
+            max_out = int(self.config.get("budget.max_output_tokens", 1800))
+            response = self.llm.complete_json(
+                purpose="polish",
+                payload=polish_payload,
+                max_output_tokens=max_out,
+                before_attempt=self._reserve_model_call,
+            )
+            data = response.data if isinstance(response.data, dict) else {}
+            merged = copy.deepcopy(content.as_dict())
+            if isinstance(data.get("title"), str) and data["title"].strip():
+                merged["title"] = data["title"]
+            if isinstance(data.get("caption"), list) and data["caption"]:
+                merged["caption"] = data["caption"]
+
+            patch = data.get("storyboard_patch")
+            sb = merged.get("storyboard")
+            if isinstance(patch, dict) and isinstance(sb, dict):
+                patch_cover = patch.get("cover")
+                if isinstance(patch_cover, dict) and isinstance(sb.get("cover"), dict):
+                    for key in ("kicker", "headline", "subhead", "attribution", "emphasis"):
+                        if key in patch_cover:
+                            sb["cover"][key] = patch_cover[key]
+                patch_cards = patch.get("cards")
+                sb_cards = sb.get("cards")
+                if isinstance(patch_cards, list) and isinstance(sb_cards, list):
+                    for idx, p_card in enumerate(patch_cards):
+                        if not isinstance(p_card, dict):
+                            continue
+                        target_card = None
+                        if isinstance(p_card.get("index"), int) and 0 <= p_card["index"] < len(sb_cards):
+                            target_card = sb_cards[p_card["index"]]
+                        elif isinstance(p_card.get("ordinal"), int):
+                            card_idx = p_card["ordinal"] - 2
+                            if 0 <= card_idx < len(sb_cards):
+                                target_card = sb_cards[card_idx]
+                        elif len(patch_cards) == len(sb_cards) and idx < len(sb_cards):
+                            target_card = sb_cards[idx]
+                        if isinstance(target_card, dict):
+                            for key in ("kicker", "headline", "subhead", "points", "columns", "attribution", "emphasis"):
+                                if key in p_card:
+                                    target_card[key] = p_card[key]
+
+            polished = validate_draft_payload(
+                merged,
+                evidence_by_id=validation_evidence,
+                config=self.config,
+                date_unknown=False,
+                generator=content.generator,
+                model=content.model,
+                require_storyboard=True,
+                soft_body_limit=True,
+                include_sources_in_body=False,
+                public_disclaimers=False,
+                repair_caption_claims=False,
+                owner_context=f"{brief.topic}\n{brief.instruction}",
+            )
+            polished.caption = [
+                p
+                for p in polished.caption
+                if "公开资料整理" not in p and "未做个人实测" not in p
+            ]
+            cleaned = []
+            for p in polished.caption:
+                no_urls = re.sub(r"https?://\S+", "", p).strip()
+                no_urls = re.sub(r"[ \t]{2,}", " ", no_urls)
+                if no_urls:
+                    cleaned.append(no_urls)
+            polished.caption = cleaned
+            if not polished.caption:
+                raise DraftError("polish produced empty caption")
+            orig_cards = len(content.storyboard.all_cards()) if content.storyboard else 0
+            new_cards = len(polished.storyboard.all_cards()) if polished.storyboard else 0
+            if new_cards != orig_cards:
+                raise DraftError("polish changed storyboard card count")
+            return polished
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Style polish skipped/reverted (%s); keeping original draft", exc
+            )
+            issue_codes = ", ".join(
+                str(i.get("code") or "") for i in report.issues[:5] if i.get("code")
+            )
+            note = f"style_lint(score={report.score}): {issue_codes or 'style'}"
+            if note not in content.uncertainties:
+                content.uncertainties.append(note)
+            return content
+
+    def _record_submitted_visual(self, artifact) -> None:
+        if artifact is None or not artifact.images:
+            return
+        from bot.visual.selector import record_recent
+        from bot.visual.similarity import dhash
+
+        first = artifact.images[0] if artifact.images else {}
+        content_dict = artifact.content if isinstance(artifact.content, dict) else {}
+        sb = content_dict.get("storyboard") if isinstance(content_dict.get("storyboard"), dict) else {}
+        cover = sb.get("cover") if isinstance(sb.get("cover"), dict) else {}
+        plan = content_dict.get("editorial_plan") if isinstance(content_dict.get("editorial_plan"), dict) else {}
+
+        theme = str(first.get("theme") or plan.get("visual_theme") or "")
+        palette = str(first.get("palette") or "")
+        cover_variant = str(cover.get("variant") or "headline")
+        cover_hash: int | None = None
+        path_str = str(first.get("path") or "")
+        if path_str:
+            p = Path(path_str)
+            if p.is_file():
+                try:
+                    cover_hash = dhash(p)
+                except Exception:
+                    cover_hash = None
+        record_recent(
+            self.db,
+            {
+                "run_key": self.run_key,
+                "theme": theme,
+                "palette": palette,
+                "cover_variant": cover_variant,
+                "cover_dhash": cover_hash,
+            },
+            clock=self.clock,
+        )
 
     def inspect_layout(self, artifact):
         issues = []
         if artifact is None or not artifact.images:
             return ["no rendered images"]
-        inspector = self.image_inspector or self._inspect_image
-        for image in artifact.images:
+        for idx, image in enumerate(artifact.images, start=1):
             path = Path(str(image.get("path") or ""))
+            ordinal = int(image.get("ordinal") or idx)
+            is_html = bool(image.get("theme"))
             try:
-                issue = inspector(path)
+                if self.image_inspector is not None:
+                    issue = self.image_inspector(path)
+                else:
+                    issue = self._inspect_image(path, ordinal=ordinal, is_html=is_html)
             except Exception as exc:
                 issue = str(exc)
             if issue:
                 issues.append(f"{path}: {issue}")
         return issues
 
-    def _inspect_image(self, path: Path):
+    def _inspect_image(self, path: Path, *, ordinal: int = 1, is_html: bool = False):
         if not path.exists():
             return "missing file"
         with Image.open(path) as im:
             if im.width <= 0 or im.height <= 0:
                 return "invalid dimensions"
-        return ""
+            exp_w = int(self.config.get("render.width", 1080))
+            exp_h = int(self.config.get("render.height", 1440))
+            if (im.width, im.height) != (exp_w, exp_h):
+                return f"unexpected dimensions {im.width}x{im.height}, expected {exp_w}x{exp_h}"
+
+        try:
+            from bot.visual.similarity import dhash, hamming, largest_blank_band
+        except Exception:
+            return ""
+
+        problems: list[str] = []
+        max_blank = float(self.config.get("render.max_blank_band", 0.34))
+        blank_limit = max_blank if is_html else max(0.90, max_blank)
+        _, band_ratio = largest_blank_band(path)
+        if band_ratio > blank_limit:
+            problems.append(f"excessive blank band ({band_ratio:.0%} > {blank_limit:.0%})")
+
+        if ordinal == 1:
+            min_dist = int(self.config.get("render.cover_min_distance", 12))
+            if min_dist > 0:
+                from bot.visual.selector import load_recent
+
+                cur_hash = dhash(path)
+                for item in load_recent(self.db):
+                    other_key = str(item.get("run_key") or "")
+                    if other_key == self.run_key:
+                        continue
+                    prev_hash = item.get("cover_dhash")
+                    if isinstance(prev_hash, int) and hamming(cur_hash, prev_hash) < min_dist:
+                        label = other_key or "recent"
+                        problems.append(
+                            f"cover too similar to {label}; re-render with another theme"
+                        )
+        return "; ".join(problems)
 
     def review_artifact(self, *, brief, artifact, materials):
         issues = list(submission_issues(artifact, {m.material_id: m for m in materials}))
@@ -794,6 +1268,10 @@ class LiveRuntime:
                     return existing
             raise
         self._backfill_lineage(draft, finalized)
+        try:
+            self._record_submitted_visual(artifact)
+        except Exception:
+            pass
         artifact.status = "submitted"
         self.store.save_artifact(artifact)
         return ToolResult(ok=True, terminal="submit", data={
@@ -895,6 +1373,10 @@ class LiveRuntime:
         # Persist the draft pointer before the render/finalize side effects so a
         # crash or retried submit can find the already-created draft.
         artifact.draft_id = int(draft["id"])
+        try:
+            self._record_submitted_visual(artifact)
+        except Exception:
+            pass
         artifact.status = "submitted"
         self.store.save_artifact(artifact)
         if not artifact.images:
@@ -927,6 +1409,10 @@ class LiveRuntime:
                      str(finalized["approval_code"]), to_iso(self.clock.now()),
                      int(topic_request_id)),
                 )
+        try:
+            self._record_submitted_visual(artifact)
+        except Exception:
+            pass
         artifact.status = "submitted"
         self.store.save_artifact(artifact)
         return ToolResult(ok=True, terminal="submit", data={

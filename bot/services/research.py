@@ -1354,6 +1354,7 @@ def build_writer_payload(
     instruction: str | None = None,
     current_draft: dict | None = None,
     revision_request: dict[str, Any] | None = None,
+    seed: str = "",
 ) -> dict[str, Any]:
     # 组装给写稿模型的输入：
     #   event      事件标题/摘要/是否日期未知
@@ -1361,13 +1362,35 @@ def build_writer_payload(
     #   audience   受众描述和关键词
     #   constraints 标题/正文长度、禁用词
     #   editorial_profile 长期、可编辑的账号偏好（不是模板）
+    #   voice      账号人设、开口招式、好坏例句（按 seed 轮换）
+    #   avoid_recent 近期已用开头/标题/封面/视觉主题，避免雷同
     #   memory     账号历史偏好
     #   now/timezone 让模型知道“今天”是哪天
     # 注意：网页原文只作为 evidence 数据传入，不会被当成指令执行。
     from ..editorial import load_editorial_profile
+    from ..style_lint import recent_posts
+    from ..visual.selector import load_recent as load_recent_visual
+    from ..visual.themes import theme_catalog
+    from ..voice import load_voice
 
     memory = account_memory(db, config)
     profile = load_editorial_profile(config)
+    voice = load_voice(config)
+    recent = recent_posts(db, limit=max(8, voice.recent_window))
+    recent_visual = load_recent_visual(db)
+    seed_val = seed or f"{event['id'] if 'id' in event.keys() else ''}:{event['title'] if 'title' in event.keys() else ''}"
+    recent_openings = [p.opening_move for p in recent[:2] if p.opening_move]
+    voice_dict = voice.as_prompt_dict(seed=seed_val, recent_openings=recent_openings)
+    avoid_recent = {
+        "openings": [p.opening for p in recent[:8] if p.opening],
+        "titles": [p.title for p in recent[:8] if p.title],
+        "cover_headlines": [p.cover_headline for p in recent[:8] if p.cover_headline],
+        "themes": [
+            str(item.get("theme") or "")
+            for item in reversed(recent_visual[-3:])
+            if item.get("theme")
+        ],
+    }
     date_unknown = date_is_unknown(evidence)
     payload: dict[str, Any] = {
         "event": {
@@ -1410,13 +1433,28 @@ def build_writer_payload(
                 "diagram",
                 "argument",
                 "annotated",
+                "stat",
+                "quote",
+                "timeline",
+                "checklist",
+                "qa",
             ],
+            "visual_layout_notes": {
+                "stat": "大数字冲击卡（stats=[{value,unit,label}]，仅用证据数字）",
+                "quote": "原话金句卡（subhead 放原话，attribution 放说话人/来源）",
+                "timeline": "时间线演化卡（points 每条以时间开头，如 '2026-04 事件'）",
+                "checklist": "可执行检查清单（columns 两栏：左栏做/建议，右栏不做/避坑）",
+                "qa": "问答卡（points 每条用 '问题｜回答' 格式）",
+            },
             "caption_policy": (
                 "no universal caption/image length ratio and no required card count; "
                 "choose image_led, caption_led or balanced for this topic and justify it"
             ),
         },
         "editorial_profile": profile.as_prompt_dict(),
+        "voice": voice_dict,
+        "avoid_recent": avoid_recent,
+        "visual_themes": theme_catalog(),
         "memory": memory,
         "timezone": config.timezone_name,
         "now": to_iso((clock or SystemClock()).now()),

@@ -390,6 +390,110 @@ def _parse_command(text: str) -> tuple[str | None, str, str]:
     return None, "", ""
 
 
+COMMAND_HELP = 'AI 运营助手 · 使用帮助\n【写稿】\n选题 <主题或链接>：可同时说明受众、角度和风格。\n修改 <具体意见>：修改最近一篇可修改作品；多篇同时处理时请先核对对象。\n\n【审批】\n批准 XH-XXXXXX：同意真实发布对应版本；先看完整正文和图片。\n拒绝 XH-XXXXXX：拒绝这份审批。\n请用机器人发给你的实际 XH 审批码替换示例编号。\n\n【发布与故障处理】\n发布状态 XH-XXXXXX：查看进度。\n检查原因 XH-XXXXXX：只检查，不触发发布。\n修复并重试 XH-XXXXXX：修复可处理的问题；结果未知时先查原发送，不直接重发。\n已登录 XH-XXXXXX：你完成扫码后，继续这篇任务；机器人会重新核验账号。编号标识作品，不是登录凭据。\n暂停发布 XH-XXXXXX / 继续发布 XH-XXXXXX：暂停或恢复任务。\n取消发布 XH-XXXXXX：停止后续提交；不能撤回已发帖，在途发送仍需查结果。\n确认未发布并重试 XH-XXXXXX：仅在你核实平台确实没有发布后使用。\n\n扫码是恢复账号登录，带编号是指定继续哪一篇。先按机器人提示完成登录，再发“已登录 编号”，这句话本身不会完成登录。\n例：选题 AI 智能体记忆，用生活例子解释，少用术语。\n例：修改 开头改成我的观点，保留第二张图。\n随时发送 帮助、菜单 或 help 查看本说明。'
+
+_PUBLICATION_COMMAND_RE = re.compile(
+    r"^(发布状态|检查原因|修复并重试|已登录|取消发布|拒绝发布|暂停发布|继续发布|确认未发布并重试)"
+    r"\s*(XH-[A-Z0-9]{4,12})$",
+    re.IGNORECASE,
+)
+
+
+def _revision_failure_text(outcome: str, accepted: dict) -> str:
+    if outcome == "revision_ambiguous":
+        rows = accepted.get("candidates") or []
+        codes = "、".join(
+            str(row.get("code") or "") for row in rows if row.get("code")
+        )
+        return (
+            f"找到多篇可以修改的作品：{codes}。请回复"
+            "“修改 XH-编号 + 具体意见”，我只会改你指定的那一篇。"
+        )
+    if outcome == "revision_no_target":
+        code = str(accepted.get("explicit_code") or "")
+        if code:
+            return (
+                f"没有找到可修改的 {code}。它可能已经发布，或不属于当前账号；"
+                "已发布作品不能就地修改，也不会自动重发。请发送“发布状态 "
+                f"{code}”核对。"
+            )
+        return (
+            "没有找到可以修改的已送审作品。已发布作品不能就地修改；"
+            "请先发送“选题 …”生成新稿，或发送“发布状态 XH-编号”核对。"
+        )
+    if outcome == "revision_in_flight":
+        code = str(accepted.get("approval_code") or "")
+        return (
+            f"{code} 正在发布或已有在途发送，不能就地换稿。"
+            "为避免旧批准覆盖新内容，我没有修改；请先发送“发布状态 "
+            f"{code}”确认结果。"
+        )
+    if outcome == "revision_already_running":
+        code = str(accepted.get("approval_code") or "")
+        return (
+            f"{code} 已有一轮修改正在进行。为避免两个版本互相覆盖，"
+            "这次没有另起修改；请等这一轮结果后再发新意见。"
+        )
+    if outcome == "revision_needs_instruction":
+        return "请说明具体要改什么，例如“修改 XH-编号 标题短一点，正文保留”。"
+    if outcome == "revision_conflict":
+        return "这篇作品的状态刚刚变化，我没有修改。请先发送“发布状态 XH-编号”核对。"
+    return "这次修改没有执行，请发送“发布状态 XH-编号”核对后再试。"
+
+
+def _replay_publication_reply(
+    db: Database, config: Config, clock: Clock, message_id: str, existing: Any
+) -> None:
+    """Best-effort receipt for a publication command that was already accepted.
+
+    Feishu retries callbacks.  The first delivery may have committed the inbound
+    row and then crashed before queueing the reply.  A duplicate must not
+    re-execute the command, but it should still leave the owner with one visible
+    receipt.  The notification dedupe key is what makes this at-most-once.
+    """
+    if not bool(config.get("publication_agent.enabled", False)):
+        return
+    text = str(existing["text"] or "").strip()
+    m = _PUBLICATION_COMMAND_RE.match(text)
+    if m is None:
+        return
+    outcome = str(existing["outcome"] or "")
+    if outcome.startswith("rejected_") or outcome in {
+        "help", "missing_message_id", "rejected_no_owner", "rejected_sender",
+    }:
+        return
+    if outcome == "processing":
+        # A callback may be retried while the first delivery is still working.
+        # Do not tell the owner it crashed during that window; the first call
+        # will queue the real receipt.  Only an old processing row is evidence
+        # that the process died between accepting the command and replying.
+        accepted = parse_iso(existing["received_at"])
+        if accepted is not None and (clock.now() - accepted).total_seconds() < 120:
+            return
+    dedupe_key = f"inbound:{message_id}"
+    if db.fetchone("SELECT id FROM notifications WHERE dedupe_key=?", (dedupe_key,)) is not None:
+        return
+    detail = json_loads(existing["detail"], {}) or {}
+    result = detail.get("publication") if isinstance(detail, dict) else None
+    reply = ""
+    if isinstance(result, dict) and outcome != "processing":
+        from .publication_agent.entry import format_command_reply
+        try:
+            reply = format_command_reply(db, result, command_text=text)
+        except Exception:
+            reply = ""
+    if not reply:
+        action, code = m.group(1), m.group(2).upper()
+        if outcome == "processing":
+            reply = (
+                f"已收到“{action} {code}”，但上次处理中断了，没有生成回执。"
+                f"请重新发送一次“{action} {code}”。"
+            )
+        else:
+            reply = f"已处理“{action} {code}”（{outcome}），但没有找到可复用的回执内容。"
+    notifications.queue_outcome(db, config, clock, reply, dedupe_key=dedupe_key)
+
+
 def handle_inbound_message(
     db: Database,
     config: Config,
@@ -416,6 +520,7 @@ def handle_inbound_message(
             "SELECT * FROM inbound_messages WHERE message_id=?", (message_id,)
         ).fetchone()
     if existing is not None:
+        _replay_publication_reply(db, config, clock, message_id, existing)
         return {
             "ok": False,
             "duplicate": True,
@@ -457,6 +562,28 @@ def handle_inbound_message(
     is_p2p = (chat_type or "").lower() in {"p2p", "private"}
 
     pub_text = (text or "").strip()
+    if pub_text.lower() in {"帮助", "菜单", "help", "/help"}:
+        if not is_p2p:
+            return _record_rejected(
+                db, now, message_id, channel, sender_id, chat_id, chat_type,
+                text, "rejected_chat_type", "帮助仅支持本人私聊",
+            )
+        with db.tx() as conn:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO inbound_messages"
+                "(message_id,channel,sender_id,chat_id,chat_type,text,received_at,outcome,detail) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (message_id, channel, sender_id, chat_id, chat_type,
+                 text, now, "help", "command menu"),
+            )
+            if not cursor.rowcount:
+                return {"ok": False, "duplicate": True, "outcome": "help"}
+            notifications.queue_outcome(
+                db, config, clock, COMMAND_HELP,
+                dedupe_key=f"help:{message_id}", conn=conn,
+            )
+        return {"ok": True, "outcome": "help"}
+
     if bool(config.get("publication_agent.enabled", False)) and re.match(
         r"^(发布状态|检查原因|修复并重试|已登录|取消发布|拒绝发布|暂停发布|继续发布|确认未发布并重试)\s*XH-",
         pub_text,
@@ -467,7 +594,7 @@ def handle_inbound_message(
                 db, now, message_id, channel, sender_id, chat_id, chat_type, text,
                 "rejected_chat_type", "publication commands are only accepted in a p2p chat",
             )
-        from .publication_agent.entry import handle_command
+        from .publication_agent.entry import format_command_reply, handle_command
 
         with db.tx() as conn:
             conn.execute(
@@ -477,10 +604,27 @@ def handle_inbound_message(
             )
         result = handle_command(db, config, clock, pub_text, event_key=message_id)
         outcome = str(result.get("outcome") or "publication_command")
-        _finish_message(
-            db, now, message_id, outcome, str(result.get("detail") or result.get("state") or ""),
-            extra={"publication": result},
-        )
+        detail = str(result.get("detail") or result.get("state") or "")
+        try:
+            reply = format_command_reply(db, result, command_text=pub_text)
+        except Exception:
+            # The command may already have changed state.  Never leave the owner
+            # with silence just because rendering failed.
+            reply = (
+                f"命令已处理（{outcome}），但生成回执时出错了。"
+                f"请发送“发布状态 {result.get('code') or ''}”重新查看。"
+            )
+        # State update and the visible receipt are committed together.  This closes
+        # the window where a crash after accepting the command leaves no reply.
+        with db.tx() as conn:
+            conn.execute(
+                "UPDATE inbound_messages SET outcome=?, detail=? WHERE message_id=?",
+                (outcome, json_dumps({"detail": detail, "publication": result}), message_id),
+            )
+            notifications.queue_outcome(
+                db, config, clock, reply,
+                dedupe_key=f"inbound:{message_id}", conn=conn,
+            )
         return {
             "ok": bool(result.get("ok")),
             "outcome": outcome,
@@ -501,9 +645,14 @@ def handle_inbound_message(
         or v2_text.upper().startswith("V2 ")
         or plain_topic
     )
-    v2_revision = v2_text.lower().startswith("v2 修改") or v2_text.lower().startswith("v2修改")
-    if not v2_revision and v2_text.startswith("修改") and "XH-" not in v2_text.upper():
-        v2_revision = True
+    # Every native modification goes through the Creator revision path, with
+    # or without an explicit XH code.  The old ``修改 XH-...`` route created a
+    # separate legacy draft with a different evidence set.
+    v2_revision = (
+        v2_text.lower().startswith("v2 修改")
+        or v2_text.lower().startswith("v2修改")
+        or v2_text.startswith("修改")
+    )
     if bool(config.get("creator_agent.enabled", False)) and (v2_command or v2_revision):
         if not is_p2p:
             return _record_rejected(
@@ -522,6 +671,7 @@ def handle_inbound_message(
                     text=text,
                     sender_id=sender_id,
                     chat_type=chat_type,
+                    config=config,
                 )
             else:
                 accepted = accept_inbound(
@@ -540,9 +690,19 @@ def handle_inbound_message(
                 "creator_brief_error", f"creator brief rejected: {type(exc).__name__}: {exc}",
             )
         if not accepted.get("ok", True):
+            outcome = str(accepted.get("outcome") or "creator_revision_rejected")
+            if v2_revision:
+                reply = _revision_failure_text(outcome, accepted)
+                notifications.queue_outcome(
+                    db,
+                    config,
+                    clock,
+                    reply,
+                    dedupe_key=f"inbound:{message_id}",
+                )
             return {
                 "ok": False,
-                "outcome": str(accepted.get("outcome") or "creator_revision_rejected"),
+                "outcome": outcome,
                 "message_id": message_id,
                 "detail": accepted,
             }
@@ -572,7 +732,7 @@ def handle_inbound_message(
                 "Creator Agent commands are only accepted in a p2p chat",
             )
         detail = (
-            "旧固定选题命令已退役。请直接发送：选题 <主题/链接>；"
+            "未识别该命令。发送 帮助 查看完整用法。也可以直接发送：选题 <主题/链接>；"
             "修改 <意见>；批准 XH-XXXXXX；拒绝 XH-XXXXXX。"
         )
         result = _record_rejected(

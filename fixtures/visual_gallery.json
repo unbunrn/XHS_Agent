@@ -1,0 +1,357 @@
+{
+  "cases": [
+    {
+      "id": "draft-49",
+      "description": "Real draft #49 from var/live (cover + comparison)",
+      "content": {
+        "title": "AI证黎曼猜想?先别急着信",
+        "caption": [
+          "11月20日，Anthropic 数学家 Alpöge 公开了约 1700 万行 Lean 形式化代码，宣称与 Claude 合作找到黎曼猜想证明。",
+          "独立验证还没完成，Anthropic 也没有官方背书。"
+        ],
+        "tags": ["AI", "黎曼猜想", "Claude"],
+        "editorial_plan": {
+          "audience_need": "判断AI证明黎曼猜想的可信度",
+          "angle": "拆开宣称与承认",
+          "takeaway": "独立验证未完成，下结论太早",
+          "caption_image_division": "图片对比两条路线，正文讲背景",
+          "strategy": "balanced",
+          "rationale": "同一天出现AI辅助和纯人力两份证明草稿",
+          "visual_approach": "封面加对比卡"
+        },
+        "storyboard": {
+          "cover": {
+            "layout": "cover",
+            "variant": "headline",
+            "kicker": "宣称 ≠ 承认",
+            "headline": "AI证黎曼猜想?\n先别急着信",
+            "subhead": "1700万行Lean代码待验证",
+            "note": "据媒体报道"
+          },
+          "cards": [
+            {
+              "layout": "comparison",
+              "kicker": "11月20日",
+              "headline": "同一天，两条路",
+              "columns": [
+                {
+                  "label": "AI 辅助",
+                  "text": "Alpöge 与 Claude 合作发布 14 个分卷、约 1700 万行 Lean 代码；Anthropic 未公开背书"
+                },
+                {
+                  "label": "纯人力",
+                  "text": "数学家马苏洛耗时 12 年完成 940 页证明草稿；由美国数学学会主席瓦基尔公布"
+                }
+              ],
+              "note": "两者均待同行核验"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "draft-50",
+      "description": "Real draft #50 from var/live (cover + comparison)",
+      "content": {
+        "title": "AI证黎曼猜想?还没被承认",
+        "caption": [
+          "学者给出初步评价，但独立人工审查与可读论文仍未完成。"
+        ],
+        "tags": ["AI", "黎曼猜想"],
+        "editorial_plan": {
+          "audience_need": "分清已发生进展与尚未完成的验证",
+          "angle": "对照已发生与未发生",
+          "takeaway": "宣称不等于学术共同体承认",
+          "caption_image_division": "图片拆解差距，正文补充背景",
+          "strategy": "balanced",
+          "rationale": "事件信息密集",
+          "visual_approach": "封面加双栏对照"
+        },
+        "storyboard": {
+          "cover": {
+            "layout": "cover",
+            "variant": "question",
+            "kicker": "先别急着信",
+            "headline": "AI证了黎曼猜想?\n学界为什么还不认",
+            "subhead": "宣称 ≠ 学术共同体承认",
+            "note": "尚未独立验证"
+          },
+          "cards": [
+            {
+              "layout": "comparison",
+              "kicker": "差距在哪",
+              "headline": "宣称 vs 承认",
+              "columns": [
+                {
+                  "label": "已发生",
+                  "text": "公开约 1700 万行 Lean 代码；梅纳德估算正确概率约 98%，丘成桐称重要进展"
+                },
+                {
+                  "label": "未发生",
+                  "text": "未完成数学界人工独立核验；无人类可读完整论文；作者坦言尚未完全读懂细节"
+                }
+              ],
+              "note": "克雷研究所仍列为未解难题"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "draft-51",
+      "description": "Real draft #51 from var/live (cover-only)",
+      "content": {
+        "title": "梅纳德:信Claude的证明,但要人懂",
+        "caption": [
+          "证明与理解第一次被拆开：形式化检查通过后，人类仍要读懂框架。"
+        ],
+        "tags": ["AI", "菲尔兹奖"],
+        "editorial_plan": {
+          "audience_need": "看清菲尔兹奖得主的判断依据",
+          "angle": "98%正确把握与理解门槛的反差",
+          "takeaway": "人没懂之前还不算完成",
+          "caption_image_division": "纯正文讲透逻辑，封面只做钩子",
+          "strategy": "caption_led",
+          "rationale": "观点转折适合文字展开",
+          "visual_approach": "单封面点题"
+        },
+        "storyboard": {
+          "cover": {
+            "layout": "cover",
+            "variant": "headline",
+            "kicker": "菲尔兹奖得主梅纳德",
+            "headline": "98%相信是对的\n但人没懂就不算数",
+            "subhead": "Lean能验对错，压缩成可读版仍要几年",
+            "note": "据公开采访报道"
+          },
+          "cards": []
+        }
+      }
+    },
+    {
+      "id": "stress-new-layouts",
+      "description": "All 5 new content layouts + stat cover variant",
+      "content": {
+        "title": "新版式与统计封面压测",
+        "caption": [
+          "覆盖 stat、quote、timeline、checklist、qa 五种新增版式与 stat 封面。"
+        ],
+        "tags": ["AI", "实测"],
+        "editorial_plan": {
+          "audience_need": "验证新版式与高密度数字排版",
+          "angle": "全版式压力测试",
+          "takeaway": "五种新版式与统计封面完整渲染",
+          "caption_image_division": "视觉主导展示信息结构",
+          "strategy": "image_led",
+          "rationale": "压测视觉主题差异度与留白带控制",
+          "visual_approach": "六卡片混排"
+        },
+        "storyboard": {
+          "cover": {
+            "layout": "cover",
+            "variant": "stat",
+            "icon": "scale",
+            "kicker": "核心尺度对比",
+            "headline": "Lean 代码验完逻辑，人类还得再读几年",
+            "subhead": "整理成人类可读证明预计至少 25 万页",
+            "stats": [
+              {"value": "98%", "unit": "把握", "label": "梅纳德估算正确概率"},
+              {"value": "1700万", "unit": "行", "label": "Lean 形式化证明代码"}
+            ],
+            "emphasis": ["1700万", "25 万页"]
+          },
+          "cards": [
+            {
+              "layout": "stat",
+              "icon": "bar-chart-3",
+              "kicker": "关键数字",
+              "headline": "这份证明到底有多庞大",
+              "subhead": "来自作者自述与媒体转述的关键量级",
+              "stats": [
+                {"value": "14", "unit": "分卷", "label": "公开发布压缩归档"},
+                {"value": "25万", "unit": "页", "label": "预估文字版篇幅"},
+                {"value": "12年", "unit": "对照", "label": "同日马苏洛纯人力耗时"}
+              ]
+            },
+            {
+              "layout": "quote",
+              "icon": "quote",
+              "kicker": "观点转折",
+              "headline": "正确和理解被拆成了两件事",
+              "subhead": "形式化验证能证明每一步推理合法，但没有人能够通读 25 万页之前，数学界不能算真正理解它。",
+              "attribution": "James Maynard（牛津大学，2022 菲尔兹奖）",
+              "emphasis": ["25 万页", "理解"]
+            },
+            {
+              "layout": "timeline",
+              "icon": "clock",
+              "kicker": "事件脉络",
+              "headline": "从对齐警告到代码公开",
+              "points": [
+                "2026-07 Alpöge 与 Claude 提出雅可比猜想三维反例并获形式化验证",
+                "2026-09 陶哲轩等 25 位菲尔兹奖得主联合发表数学对齐警告",
+                "2026-11-19 Anthropic 在纳斯达克完成上市节点",
+                "2026-11-20 14 个 Lean 压缩分卷与马苏洛 940 页草稿同日公开"
+              ]
+            },
+            {
+              "layout": "checklist",
+              "icon": "check-circle-2",
+              "kicker": "阅读清单",
+              "headline": "普通读者和开发者看什么",
+              "columns": [
+                {
+                  "label": "值得盯的点",
+                  "text": "形式化验证工具链 Lean 4 的大规模扩展能力；后续独立压缩摘要是否公布。"
+                },
+                {
+                  "label": "先别轻信的点",
+                  "text": "把个人网站声明等价成数学界公认；忽略克雷研究所未解决列表现状。"
+                }
+              ]
+            },
+            {
+              "layout": "qa",
+              "icon": "help-circle",
+              "kicker": "高频疑问",
+              "headline": "三个大家最关心的问题",
+              "points": [
+                "Claude 独立证明出来的吗？｜作者明确是人机协作，前面探索仍靠数学家完成",
+                "为什么没人直接去通读检查？｜约 1700 万行代码相当于 25 万页，超过个人通读极限",
+                "Anthropic 官方认可了吗？｜截至目前公司并未公开为该证明结论背书"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "stress-classic-layouts",
+      "description": "Classic content layouts + split cover variant + CJK/Latin mix",
+      "content": {
+        "title": "经典六版式与分栏封面压测",
+        "caption": [
+          "覆盖 split 封面与 comparison、process、keypoints、diagram、argument 五种经典内容版式。"
+        ],
+        "tags": ["工作流", "工程"],
+        "editorial_plan": {
+          "audience_need": "测试经典内容布局在 HTML 主题中的排版效果",
+          "angle": "分栏与流程演示",
+          "takeaway": "全版式混排稳定无溢出",
+          "caption_image_division": "图像展示结构",
+          "strategy": "image_led",
+          "rationale": "全布局验证",
+          "visual_approach": "双栏封面加五类内容卡"
+        },
+        "storyboard": {
+          "cover": {
+            "layout": "cover",
+            "variant": "split",
+            "icon": "git-compare",
+            "kicker": "形式化验证 vs 传统审阅",
+            "headline": "Lean 机器核验|人类学者通读",
+            "subhead": "AI 跑完最后一段冲刺，理解整体框架才刚刚开始"
+          },
+          "cards": [
+            {
+              "layout": "comparison",
+              "kicker": "路径对比",
+              "headline": "形式化验证和人类审稿差在哪",
+              "columns": [
+                {"label": "Lean 4 编译器", "text": "逐行校验逻辑依赖与类型约束，拒绝模糊跳跃，但不负责解释直觉。"},
+                {"label": "同行学者审阅", "text": "关注引理动机、全局框架和反例风险，目前仍卡在 25 万页体量上。"}
+              ]
+            },
+            {
+              "layout": "process",
+              "kicker": "验证路径",
+              "headline": "梅纳德设想的三步消化流程",
+              "points": [
+                "第一步：先确认 14 个 Lean 压缩分卷在独立环境中零报错复现。",
+                "第二步：用 AI 将 1700 万行细节折叠成人类可阅读的模块摘要。",
+                "第三步：数学家在数年内逐层核对核心定理的证明结构与假设。"
+              ]
+            },
+            {
+              "layout": "keypoints",
+              "icon": "sparkles",
+              "kicker": "混排重点",
+              "headline": "CJK 与英文标识符混排检查",
+              "points": [
+                "Lean 4.12 + Mathlib4 形式化库承担底层推导检查，耗时比人工审稿快数个量级。",
+                "API v2 与上下文长度提升让大模型可以持续输出长程形式化脚本。",
+                "核心结论：形式化通过率 100% 不自动等于问题已经被人类消化。"
+              ],
+              "emphasis": ["Lean 4.12", "100%"]
+            },
+            {
+              "layout": "diagram",
+              "kicker": "分工结构",
+              "headline": "人机协作的真实边界划分",
+              "points": [
+                "前期方向与猜想分解 -> 由数学家长期积累与直觉决定",
+                "长链条 Lean 语法补全 -> Claude 承担高强度试错与机械验证",
+                "最终认可与教学传承 -> 仍取决于可读版本与共同体背书"
+              ]
+            },
+            {
+              "layout": "argument",
+              "kicker": "冷静判断",
+              "headline": "为什么说这事比结果本身更重要",
+              "points": [
+                "即便后续在某个边界条件发现瑕疵，百万行级自动验证的工程意义依然存在。",
+                "发布节点紧挨公司上市引发争议，更说明科学宣称必须依赖第三方独立复核。",
+                "对普通工程师而言，规范化校验工具正在成为复杂推理的必备护栏。"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "stress-quote-annotated",
+      "description": "Quote cover variant + annotated layout stress case",
+      "content": {
+        "title": "引述封面与原文批注压测",
+        "caption": [
+          "覆盖 quote 封面与 annotated 批注卡。"
+        ],
+        "tags": ["摘录", "批注"],
+        "editorial_plan": {
+          "audience_need": "检验原话引述与来源摘录批注卡片密度",
+          "angle": "金句加摘录拆解",
+          "takeaway": "关键引述清晰标注说话人与出处",
+          "caption_image_division": "图片承载原话与批注",
+          "strategy": "image_led",
+          "rationale": "验证 quote 封面与 annotated 卡片布局",
+          "visual_approach": "引述封面加批注卡"
+        },
+        "storyboard": {
+          "cover": {
+            "layout": "cover",
+            "variant": "quote",
+            "icon": "quote",
+            "kicker": "数学家原话",
+            "headline": "证明和理解被拆开，才是这次真正的新问题",
+            "subhead": "过去两件事总是一起发生：要么你理解了证明，要么你根本拿不出证明。现在第一次被分开了。",
+            "attribution": "James Maynard"
+          },
+          "cards": [
+            {
+              "layout": "annotated",
+              "icon": "file-text",
+              "kicker": "报道原文拆解",
+              "headline": "看新闻时容易忽略的三处细节",
+              "subhead": "Alpöge 在个人网站发布了 14 个 Lean 压缩分卷并估测约 25 万页，同时 Anthropic 未作官方背书。",
+              "points": [
+                "个人网站发布意味着还没有经过传统预印本与期刊同行评审流程。",
+                "约 25 万页只是代码换算后的篇幅估计，并不存在现成的可读讲义。",
+                "Anthropic 未背书保留了公司在商业与学术声誉之间的安全边界。"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

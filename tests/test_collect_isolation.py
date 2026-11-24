@@ -1,9 +1,8 @@
-"""The recurring collector must never be killed by a query-less topic row."""
+"""A query-less topic row must not abort source ingestion."""
 
 import unittest
 
 from bot.services.research import _topic_source_name, ingest_source, sync_sources
-from bot.worker import Worker
 from tests.helpers import new_env
 
 
@@ -51,27 +50,6 @@ class CollectSourceIsolationTests(unittest.TestCase):
         # The row is still enabled and auditable; only this round skipped it.
         self.assertEqual(
             self.env.db.scalar("SELECT enabled FROM sources WHERE id=?", (row["id"],)), 1
-        )
-
-    def test_recurring_collect_skips_commissioned_topic_rows(self):
-        worker = Worker(self.env.config, db=self.env.db, clock=self.env.clock)
-        worker.startup()
-        result = worker._handle_collect(None)
-        # Only the configured fixture source is collected; the dynamic topic
-        # source is preserved for its topic job and does not abort the round.
-        self.assertEqual(result["sources"], 1)
-        self.assertEqual(
-            self.env.db.scalar(
-                "SELECT enabled FROM sources WHERE url=?",
-                (f"deepseek-search://topic/{self.code}",),
-            ),
-            1,
-        )
-        self.assertIsNone(
-            self.env.db.scalar(
-                "SELECT last_error FROM sources WHERE url=?",
-                (f"deepseek-search://topic/{self.code}",),
-            )
         )
 
     def tearDown(self):
