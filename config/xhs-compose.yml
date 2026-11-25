@@ -2,7 +2,7 @@
 name: bot-xhs
 services:
   bridge:
-    image: xpzouying/xiaohongshu-mcp@sha256:90105616646a59babd3351503084ce8347eb2c2a7df166b0165efdc0306ed1f0
+    image: xpzouying/xiaohongshu-mcp@sha256:0ec7b30e179379f6c276e1f9d8af5194eb18d7e66150d4c39b43b166be2cdef6
     platform: linux/amd64
     container_name: bot-xhs-bridge
     restart: unless-stopped
