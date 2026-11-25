@@ -563,12 +563,13 @@ def handle_command(
                 return {"ok": False, "outcome": "attempt_changed_before_confirmation", "code": code}
             moved = conn.execute(
                 "UPDATE publication_tasks SET state='ready', wait_reason=?, active_attempt_id=NULL, "
-                "retry_count=retry_count+1, generation=generation+1, updated_at=? "
+                "last_error_class=NULL, retry_count=retry_count+1, generation=generation+1, updated_at=? "
                 "WHERE id=? AND generation=?",
                 ("owner confirmed not published", now, task.id, int(task.generation)),
             )
             if moved.rowcount != 1:
                 return {"ok": False, "outcome": "task_changed_before_confirmation", "code": code}
+        store.batch_start(task.id, force=True)
         job_id = wake_task(db, clock, task.id, reason="confirmed_not_published", event_key=event_key)
         return {"ok": True, "outcome": "retry_queued", "code": code, "job_id": job_id}
     return {"ok": False, "outcome": "unsupported_command", "code": code}
